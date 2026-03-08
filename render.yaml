@@ -43,6 +43,9 @@ services:
         value: production
       - key: LOG_LEVEL
         value: INFO
+      # Use N8N_TRIGGER_URL (full URL) when internal hostname fails to resolve
+      - key: N8N_TRIGGER_URL
+        sync: false   # e.g. https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger
       - key: N8N_INTERNAL_URL
         fromService:
           type: web

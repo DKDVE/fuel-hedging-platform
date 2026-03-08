@@ -71,6 +71,8 @@ class Settings:
     N8N_WEBHOOK_URL: str = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/fuel-hedge-advisor")
     N8N_INTERNAL_URL: str = os.getenv("N8N_INTERNAL_URL", "http://n8n:5678")
     N8N_TRIGGER_PATH: str = os.getenv("N8N_TRIGGER_PATH", "/webhook/fuel-hedge-trigger")
+    # Full URL override — use when N8N_INTERNAL_URL hostname fails to resolve (e.g. Render)
+    N8N_TRIGGER_URL: str = os.getenv("N8N_TRIGGER_URL", "").strip()
     N8N_WEBHOOK_SECRET: str = os.getenv("N8N_WEBHOOK_SECRET", "change_me_in_production")
 
     # API Configuration

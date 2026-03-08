@@ -328,12 +328,13 @@ async def trigger_n8n_workflow(
     analytics_summary = body.get("analytics_summary", {})
     trigger_type = body.get("trigger_type", "scheduled")
 
-    log.info("triggering_n8n_workflow", run_id=run_id)
+    n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
+    log.info("triggering_n8n_workflow", run_id=run_id, target_host=n8n_url.split("/")[2] if "//" in n8n_url else "unknown")
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
-                f"{settings.N8N_INTERNAL_URL}{settings.N8N_TRIGGER_PATH}",
+                n8n_url,
                 json={
                     "run_id": run_id,
                     "analytics_summary": analytics_summary,
@@ -368,8 +369,14 @@ async def trigger_n8n_workflow(
             source="n8n_trigger",
         ) from e
     except httpx.RequestError as e:
-        log.error("n8n_trigger_request_error", error=str(e), run_id=run_id)
+        log.error(
+            "n8n_trigger_request_error",
+            error=str(e),
+            run_id=run_id,
+            target_url=n8n_url,
+            hint="Set N8N_TRIGGER_URL to the exact n8n webhook URL from Render dashboard (e.g. https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger)",
+        )
         raise DataIngestionError(
-            f"n8n trigger network error: {e}",
+            f"n8n trigger network error: {e}. Set N8N_TRIGGER_URL to the exact n8n URL from Render.",
             source="n8n_trigger",
         ) from e
