@@ -5,6 +5,7 @@ Usage:
     python manage.py train_lstm      # Train LSTM model
     python manage.py run_pipeline    # Run analytics pipeline manually
     python manage.py seed_db         # Seed development data
+    python manage.py seed_analytics  # Seed analytics runs + backtest (for Backtesting tab)
 """
 
 import asyncio
@@ -86,6 +87,14 @@ async def seed_development_data():
     print("  - Platform configuration set")
 
 
+async def seed_analytics_history():
+    """Seed analytics runs and backtest data (for Backtesting tab)."""
+    from scripts.seed_analytics_history import main as seed_main
+
+    logger.info("seeding_analytics_history")
+    await seed_main()
+
+
 def print_usage():
     """Print usage instructions."""
     print("Usage: python manage.py <command>")
@@ -94,6 +103,7 @@ def print_usage():
     print("  train_lstm     Train LSTM forecasting model")
     print("  run_pipeline   Run analytics pipeline manually")
     print("  seed_db        Seed development data")
+    print("  seed_analytics Seed analytics runs + backtest (Backtesting tab)")
     print("\nExamples:")
     print("  python manage.py load_csv")
     print("  python manage.py train_lstm")
@@ -116,6 +126,8 @@ def main():
             asyncio.run(run_analytics_pipeline())
         elif command == "seed_db":
             asyncio.run(seed_development_data())
+        elif command == "seed_analytics":
+            asyncio.run(seed_analytics_history())
         else:
             print(f"Unknown command: {command}")
             print_usage()

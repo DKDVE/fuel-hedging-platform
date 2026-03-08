@@ -40,7 +40,9 @@ In **Environment** → **Add Environment Variable**:
 ### 4. Link hedge-api to hedge-n8n
 
 1. Open **hedge-api** → **Environment**
-2. Add variable: **Key** `N8N_INTERNAL_URL`, **Value** → **From Service** → **hedge-n8n** → **Internal URL** (or **hostport**)
+2. Add variable: **Key** `N8N_INTERNAL_URL`, **Value** = one of:
+   - **Option A (internal):** hedge-n8n → **Connect** → **Internal** tab → copy the address (e.g. `http://hedge-n8n-xxxx:5678`). Both services must be in the **same region**.
+   - **Option B (public, always works):** `https://hedge-n8n.onrender.com` (use your actual hedge-n8n public URL, no trailing slash)
 3. Save (hedge-api will redeploy)
 
 ### 5. Deploy hook and GitHub secret
@@ -175,6 +177,7 @@ After hedge-n8n is running:
 | hedge-api 500 on login | Ensure `DATABASE_URL` is set (from hedge-postgres link) |
 | Cookies not sent (401 after login) | `SameSite=None` is set for production; verify `FRONTEND_ORIGIN` |
 | n8n not found | Ensure `RENDER_DEPLOY_HOOK_N8N` is set and hedge-n8n exists |
+| `n8n_trigger_failed` "Name or service not known" | `N8N_INTERNAL_URL` must be the **exact** URL from hedge-n8n dashboard (top of page). Render URLs include a random suffix, e.g. `https://hedge-n8n-abc123.onrender.com` — not `hedge-n8n.onrender.com` |
 | Migrations fail | Use External Database URL; allow `0.0.0.0/0` in Postgres Networking for GitHub Actions |
 | CSV not found | Data is at `/app/data/`; ensure `data/fuel_hedging_dataset.csv` is in repo |
 

@@ -124,6 +124,20 @@ export function useLoadCsv() {
   });
 }
 
+export function useSeedBacktest() {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ message: string }, Error, void>({
+    mutationFn: async () => {
+      const { data } = await apiClient.post<{ message: string }>('/analytics/seed-backtest', {});
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analytics', 'backtest'] });
+    },
+  });
+}
+
 export function useVarWalkForward(days: number = 90) {
   return useQuery<VarWalkForwardResponse>({
     queryKey: ['analytics', 'var-walk-forward', days],

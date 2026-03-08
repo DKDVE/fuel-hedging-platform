@@ -450,6 +450,21 @@ async def load_historical_csv(
     )
 
 
+@router.post("/seed-backtest")
+async def seed_backtest_data(
+    current_user: AdminUser,
+) -> dict:
+    """Seed analytics runs and backtest data (for Backtesting tab). Admin only.
+
+    Idempotent: skips dates that already have data. Takes ~30 seconds.
+    """
+    from scripts.seed_analytics_history import main as seed_main
+
+    logger.info("seed_backtest_triggered", user_id=str(current_user.id))
+    await seed_main()
+    return {"message": "Backtest data seeded successfully. Refresh the Backtesting tab."}
+
+
 @router.get("/latest/status", response_model=Optional[AnalyticsRunResponse])
 async def get_latest_run_status(
     current_user: CurrentUser,

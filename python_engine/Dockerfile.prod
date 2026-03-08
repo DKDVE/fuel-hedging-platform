@@ -66,5 +66,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
 # Seed DB, load historical CSV (for analytics pipeline), then start gunicorn
+# Run seed_analytics via API (POST /analytics/seed-backtest) or: python manage.py seed_analytics
 # Render Starter plan: 0.5 CPU, 512MB RAM → 2 workers max
 CMD ["sh", "-c", "python manage.py seed_db || true && python manage.py load_csv || true && exec gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:${PORT} --timeout 120 --access-logfile - --error-logfile -"]

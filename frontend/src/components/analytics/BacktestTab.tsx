@@ -13,6 +13,8 @@ import {
 } from 'recharts';
 import { formatUSD, formatMillions, formatPct } from '@/lib/formatters';
 import type { BacktestLatestResponse } from '@/hooks/useAnalytics';
+import { useSeedBacktest } from '@/hooks/useAnalytics';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface BacktestTabProps {
   data: BacktestLatestResponse | undefined;
@@ -25,6 +27,42 @@ function formatDateShort(dateStr: string) {
     day: 'numeric',
     year: '2-digit',
   });
+}
+
+function BacktestEmptyState() {
+  const { user } = useAuth();
+  const seedBacktest = useSeedBacktest();
+  const isAdmin = user?.role === 'ADMIN';
+
+  return (
+    <div className="card">
+      <div className="flex flex-col items-center justify-center py-16 text-slate-500">
+        <p className="text-lg font-medium mb-2">No backtest data yet</p>
+        {isAdmin ? (
+          <>
+            <p className="text-sm text-center max-w-md mb-4">
+              Generate backtest results (takes ~30 seconds)
+            </p>
+            <button
+              type="button"
+              onClick={() => seedBacktest.mutate()}
+              disabled={seedBacktest.isPending}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg font-medium"
+            >
+              {seedBacktest.isPending ? 'Generating…' : 'Generate backtest data'}
+            </button>
+            {seedBacktest.isError && (
+              <p className="text-red-400 text-sm mt-2">{String(seedBacktest.error)}</p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-center max-w-md">
+            Ask an admin to generate backtest data (Analytics → Backtesting → Generate)
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function BacktestTab({ data, isLoading }: BacktestTabProps) {
@@ -44,15 +82,7 @@ export function BacktestTab({ data, isLoading }: BacktestTabProps) {
 
   if (!summary || weeklyResults.length === 0) {
     return (
-      <div className="card">
-        <div className="flex flex-col items-center justify-center py-16 text-slate-500">
-          <p className="text-lg font-medium mb-2">No backtest data yet</p>
-          <p className="text-sm text-center max-w-md">
-            Run the seed script to generate backtest results: docker exec hedge-api python
-            scripts/seed_analytics_history.py
-          </p>
-        </div>
-      </div>
+      <BacktestEmptyState />
     );
   }
 
