@@ -111,21 +111,25 @@ async def _do_login(
     access_token = create_access_token({"sub": str(user.id)})
     refresh_token = create_refresh_token(str(user.id))
 
-    # Set httpOnly cookies
+    # SameSite=None required for cross-origin (e.g. GitHub Pages → Render API)
+    # SameSite=Strict blocks cookies on cross-origin requests
+    _samesite = "none" if settings.ENVIRONMENT == "production" else "strict"
+    _secure = settings.ENVIRONMENT == "production"
+
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=settings.ENVIRONMENT == "production",
-        samesite="strict",
+        secure=_secure,
+        samesite=_samesite,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
-        secure=settings.ENVIRONMENT == "production",
-        samesite="strict",
+        secure=_secure,
+        samesite=_samesite,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
 
@@ -180,21 +184,23 @@ async def refresh_tokens(
     access_token = create_access_token({"sub": str(user.id)})
     new_refresh_token = create_refresh_token(str(user.id))
     
-    # Update cookies
+    _samesite = "none" if settings.ENVIRONMENT == "production" else "strict"
+    _secure = settings.ENVIRONMENT == "production"
+
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=settings.ENVIRONMENT == "production",
-        samesite="strict",
+        secure=_secure,
+        samesite=_samesite,
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
     response.set_cookie(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=settings.ENVIRONMENT == "production",
-        samesite="strict",
+        secure=_secure,
+        samesite=_samesite,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
     
@@ -207,8 +213,9 @@ async def refresh_tokens(
 @router.post("/logout")
 async def logout(response: Response, current_user: CurrentUser) -> MessageResponse:
     """Logout user by clearing cookies."""
-    response.delete_cookie("access_token")
-    response.delete_cookie("refresh_token")
+    _samesite = "none" if settings.ENVIRONMENT == "production" else "strict"
+    response.delete_cookie("access_token", samesite=_samesite, secure=settings.ENVIRONMENT == "production")
+    response.delete_cookie("refresh_token", samesite=_samesite, secure=settings.ENVIRONMENT == "production")
     
     logger.info("user_logout", user_id=str(current_user.id))
     
