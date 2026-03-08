@@ -177,9 +177,11 @@ After hedge-n8n is running:
 | hedge-api 500 on login | Ensure `DATABASE_URL` is set (from hedge-postgres link) |
 | Cookies not sent (401 after login) | `SameSite=None` is set for production; verify `FRONTEND_ORIGIN` |
 | n8n not found | Ensure `RENDER_DEPLOY_HOOK_N8N` is set and hedge-n8n exists |
-| `n8n_trigger_failed` "Name or service not known" | Set **`N8N_TRIGGER_URL`** (full URL) in hedge-api: `https://<your-n8n-url>.onrender.com/webhook/fuel-hedge-trigger`. Get the base URL from hedge-n8n dashboard (top of page). |
+| `n8n_trigger_failed` "Name or service not known" | Set **`N8N_TRIGGER_URL`** (full URL) in hedge-api: `https://hedge-n8n-xxxx.onrender.com/webhook/fuel-hedge-trigger`. Get the exact URL from hedge-n8n dashboard (top of page). No typo: use `onrender.com` not `onzender.com`. |
 | Migrations fail | Use External Database URL; allow `0.0.0.0/0` in Postgres Networking for GitHub Actions |
 | CSV not found | Data is at `/app/data/`; ensure `data/fuel_hedging_dataset.csv` is in repo |
+
+**n8n connectivity check:** As admin, call `GET /api/v1/analytics/n8n-diagnostics?probe=true` to verify the configured URL and test the connection.
 
 ---
 

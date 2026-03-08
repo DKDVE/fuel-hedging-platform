@@ -27,28 +27,31 @@ async def trigger_daily_analytics_pipeline() -> None:
     """Trigger n8n workflow to run daily analytics + recommendation generation.
     
     Called at 00:00 UTC daily.
-    Sends POST to internal endpoint which then triggers n8n.
+    Calls n8n webhook directly (avoids API_INTERNAL_URL resolution on Render).
     """
     log.info("scheduler.trigger_daily_analytics_pipeline", utc_time=datetime.now(timezone.utc))
 
+    n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
+    payload = {
+        "run_id": f"scheduled-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
+        "analytics_summary": {},
+        "trigger_type": "daily_scheduled",
+        "triggered_at": datetime.now(timezone.utc).isoformat(),
+    }
+
     try:
         async with httpx.AsyncClient(timeout=60) as client:
-            # Call internal trigger endpoint
             response = await client.post(
-                f"{settings.API_INTERNAL_URL}/api/v1/recommendations/internal/n8n-trigger",
-                json={
-                    "run_id": f"scheduled-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
-                    "analytics_summary": {},
-                    "trigger_type": "daily_scheduled",
-                    "triggered_at": datetime.now(timezone.utc).isoformat(),
-                },
+                n8n_url,
+                json=payload,
+                headers={"X-N8N-API-Key": settings.N8N_WEBHOOK_SECRET},
             )
             response.raise_for_status()
 
             log.info(
                 "daily_analytics_triggered",
                 status_code=response.status_code,
-                response=response.json(),
+                run_id=payload["run_id"],
             )
 
     except httpx.HTTPStatusError as e:
@@ -58,7 +61,12 @@ async def trigger_daily_analytics_pipeline() -> None:
             body=e.response.text,
         )
     except httpx.RequestError as e:
-        log.error("daily_analytics_trigger_network_error", error=str(e))
+        log.error(
+            "daily_analytics_trigger_network_error",
+            error=str(e),
+            target_host=n8n_url.split("/")[2] if "//" in n8n_url else "unknown",
+            hint="Set N8N_TRIGGER_URL to full URL: https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger",
+        )
     except Exception as e:
         log.error("daily_analytics_trigger_unexpected_error", error=str(e), exc_info=True)
 

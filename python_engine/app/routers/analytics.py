@@ -629,9 +629,10 @@ def _trigger_n8n_immediate(run_id: str, triggered_by: str) -> None:
     async def _do_trigger() -> None:
         try:
             settings = get_settings()
+            n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    f"{settings.N8N_INTERNAL_URL}{settings.N8N_TRIGGER_PATH}",
+                    n8n_url,
                     json={
                         "run_id": run_id,
                         "analytics_summary": {"triggered_by": triggered_by},
@@ -658,6 +659,39 @@ async def _run_pipeline_background(notional_usd: Decimal) -> None:
             logger.error("pipeline_background_failed", error=str(e))
 
 
+@router.get("/n8n-diagnostics", include_in_schema=False)
+async def n8n_diagnostics(
+    probe: bool = Query(False, description="Attempt to reach n8n webhook"),
+    current_user: AdminUser,
+    settings=Depends(get_settings),
+) -> dict:
+    """
+    Admin-only: show n8n trigger config and optionally test connectivity.
+    Use ?probe=true to send a minimal test payload.
+    """
+    n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
+    host = n8n_url.split("/")[2] if "//" in n8n_url else "unknown"
+    result: dict = {
+        "configured_url_source": "N8N_TRIGGER_URL" if settings.N8N_TRIGGER_URL else "N8N_INTERNAL_URL + N8N_TRIGGER_PATH",
+        "target_host": host,
+        "path": "/webhook/fuel-hedge-trigger",
+    }
+    if probe:
+        import uuid
+        test_payload = {"run_id": str(uuid.uuid4()), "trigger_type": "diagnostic", "analytics_summary": {}}
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    n8n_url,
+                    json=test_payload,
+                    headers={"X-N8N-API-Key": settings.N8N_WEBHOOK_SECRET},
+                )
+            result["probe"] = {"status_code": resp.status_code, "ok": resp.status_code < 400}
+        except httpx.RequestError as e:
+            result["probe"] = {"error": str(e), "ok": False, "hint": "Set N8N_TRIGGER_URL to full URL: https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger"}
+    return result
+
+
 @router.post("/test-n8n-trigger", include_in_schema=False)
 async def test_n8n_trigger_dev(
     current_user=Depends(require_permission("trigger:pipeline")),
@@ -676,10 +710,11 @@ async def test_n8n_trigger_dev(
         "trigger_type": "test",
         "analytics_summary": {"var_usd": 2100000, "mape": 4.4, "optimal_hr": 0.68},
     }
+    n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
-                f"{settings.N8N_INTERNAL_URL}{settings.N8N_TRIGGER_PATH}",
+                n8n_url,
                 json=test_payload,
                 headers={"X-N8N-API-Key": settings.N8N_WEBHOOK_SECRET},
             )

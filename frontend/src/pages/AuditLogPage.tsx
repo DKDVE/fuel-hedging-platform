@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
+import { getApiBaseUrl } from '@/lib/api';
 import { cn, formatDate } from '@/lib/utils';
 import { Download, Calendar, Filter } from 'lucide-react';
 import { useApprovals } from '@/hooks/useAudit';
@@ -21,7 +22,7 @@ export function AuditLogPage() {
       if (dateRange.start) params.set('date_from', dateRange.start);
       if (dateRange.end) params.set('date_to', dateRange.end);
 
-      const response = await fetch(`/api/v1/audit/export?${params}`, {
+      const response = await fetch(`${getApiBaseUrl()}/audit/export?${params}`, {
         credentials: 'include',
       });
       if (!response.ok) throw new Error('Export failed');

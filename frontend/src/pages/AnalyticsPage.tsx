@@ -15,6 +15,7 @@ import {
   useBacktestLatest,
 } from '@/hooks/useAnalytics';
 import { usePermissions } from '@/hooks/usePermissions';
+import { getApiBaseUrl } from '@/lib/api';
 import { formatMillions, formatPct, formatRatio, isSafe } from '@/lib/formatters';
 import { Play, BarChart3, Database, TrendingUp, FileDown, Zap, Target } from 'lucide-react';
 import { toast } from 'sonner';
@@ -38,7 +39,7 @@ export function AnalyticsPage() {
   const handleDownloadReport = async () => {
     setGeneratingReport(true);
     try {
-      const response = await fetch('/api/v1/reports/ifrs9/latest', {
+      const response = await fetch(`${getApiBaseUrl()}/reports/ifrs9/latest`, {
         credentials: 'include',
       });
       if (!response.ok) {

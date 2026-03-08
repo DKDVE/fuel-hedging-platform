@@ -9,14 +9,14 @@
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import type { ErrorResponse } from '@/types/api';
 
-// Use absolute URL in production (set via VITE_API_BASE_URL env var)
-// Fall back to relative URL in local dev (proxied by Vite)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
-  ? `${import.meta.env.VITE_API_BASE_URL}/api/v1`
-  : '/api/v1';
+/** Base URL for API (used by api client and raw fetch for blob downloads). */
+export const getApiBaseUrl = () =>
+  import.meta.env.VITE_API_BASE_URL
+    ? `${import.meta.env.VITE_API_BASE_URL}/api/v1`
+    : '/api/v1';
 
 const api: AxiosInstance = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: getApiBaseUrl(),
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',

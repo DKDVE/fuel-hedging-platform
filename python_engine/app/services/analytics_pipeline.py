@@ -8,7 +8,7 @@ Coordinates daily analytics execution:
 5. Store results in database
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
@@ -231,12 +231,13 @@ class AnalyticsPipeline:
                 optimal_hr=recommendation.hedge_ratio,
             )
 
-            # Trigger n8n workflow to run AI agents and create recommendation
+            # Trigger n8n workflow directly (avoids API_INTERNAL_URL resolution on Render)
             settings = get_settings()
+            n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
                     resp = await client.post(
-                        f"{settings.API_INTERNAL_URL}/api/v1/recommendations/internal/n8n-trigger",
+                        n8n_url,
                         json={
                             "run_id": str(run_id),
                             "analytics_summary": {
@@ -245,12 +246,20 @@ class AnalyticsPipeline:
                                 "optimal_hr": recommendation.hedge_ratio,
                             },
                             "trigger_type": "pipeline_complete",
+                            "triggered_at": datetime.now(timezone.utc).isoformat(),
                         },
+                        headers={"X-N8N-API-Key": settings.N8N_WEBHOOK_SECRET},
                     )
                     resp.raise_for_status()
                     logger.info("n8n_workflow_triggered", run_id=str(run_id), status=resp.status_code)
             except Exception as n8n_err:
-                logger.warning("n8n_trigger_failed", run_id=str(run_id), error=str(n8n_err))
+                logger.warning(
+                    "n8n_trigger_failed",
+                    run_id=str(run_id),
+                    error=str(n8n_err),
+                    target_host=n8n_url.split("/")[2] if "//" in n8n_url else "unknown",
+                    hint="Set N8N_TRIGGER_URL to full URL: https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger",
+                )
 
             return str(run_id)
 
