@@ -4,12 +4,19 @@
  * - localStorage used for access_token — violates .cursorrules (NEVER localStorage for sensitive data).
  * - Cookies (httpOnly) are the auth mechanism; withCredentials must send them on every request.
  * - Relative baseURL ensures all requests go through Vite proxy to api:8000.
+ * - In production (GitHub Pages), VITE_API_BASE_URL is set → use absolute URL to Render API.
  */
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import type { ErrorResponse } from '@/types/api';
 
+// Use absolute URL in production (set via VITE_API_BASE_URL env var)
+// Fall back to relative URL in local dev (proxied by Vite)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+  ? `${import.meta.env.VITE_API_BASE_URL}/api/v1`
+  : '/api/v1';
+
 const api: AxiosInstance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: API_BASE_URL,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
@@ -51,7 +58,8 @@ api.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError);
         if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
+          const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
+          window.location.href = `${base}/login`;
         }
         return Promise.reject(refreshError);
       } finally {

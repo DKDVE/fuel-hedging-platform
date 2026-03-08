@@ -55,7 +55,11 @@ export function useLivePrices() {
   const connect = useCallback(() => {
     esRef.current?.close();
 
-    const es = new EventSource('/api/v1/stream/prices', { withCredentials: true });
+    const SSE_BASE = import.meta.env.VITE_API_BASE_URL
+      ? `${import.meta.env.VITE_API_BASE_URL}/api/v1`
+      : '/api/v1';
+
+    const es = new EventSource(`${SSE_BASE}/stream/prices`, { withCredentials: true });
 
     es.onopen = () => {
       setConnected(true);

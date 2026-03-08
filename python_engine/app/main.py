@@ -90,7 +90,7 @@ app.add_middleware(
     allow_origins=list(dict.fromkeys(_origins)),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Content-Type", "Authorization", "X-N8N-API-Key", "X-Request-ID"],
     expose_headers=["X-Total-Count", "X-Page", "X-Per-Page", "X-Request-ID"],
 )
 
