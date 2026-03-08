@@ -49,4 +49,5 @@ ENV PORT=10000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
-CMD ["sh", "-c", "gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:${PORT} --timeout 120 --access-logfile - --error-logfile -"]
+# Seed database on first run (creates admin user, system user, platform config)
+CMD ["sh", "-c", "python manage.py seed_db || true && exec gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:${PORT} --timeout 120 --access-logfile - --error-logfile -"]

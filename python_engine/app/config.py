@@ -11,9 +11,12 @@ class Settings:
     """Application settings loaded from environment variables."""
 
     # Database — no default with real credentials; use .env
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://hedgeuser:CHANGE_ME@localhost:5432/hedge_db"
+    # Treat empty string as unset (GitHub Actions passes empty when secret missing)
+    _db_url = os.getenv("DATABASE_URL", "").strip()
+    DATABASE_URL: str = (
+        _db_url
+        if _db_url
+        else "postgresql+asyncpg://hedgeuser:CHANGE_ME@localhost:5432/hedge_db"
     )
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
