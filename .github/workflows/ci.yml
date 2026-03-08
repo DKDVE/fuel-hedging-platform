@@ -152,7 +152,7 @@ jobs:
 
       - name: Build
         env:
-          VITE_API_BASE_URL: https://hedge-api.onrender.com
+          VITE_API_BASE_URL: https://hedge-api-o9t3.onrender.com
         run: npm run build
 
       - name: Upload build artifact

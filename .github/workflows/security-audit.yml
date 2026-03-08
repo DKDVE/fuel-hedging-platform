@@ -53,6 +53,7 @@ jobs:
             safety-report.json
             bandit-report.json
             pip-audit-report.json
+          if-no-files-found: ignore
 
   frontend-security:
     name: Frontend Security Scan
@@ -84,7 +85,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --severity-threshold=high --json-file-output=snyk-report.json
+          args: --severity-threshold=high --json-file-output=frontend/snyk-report.json
           
       - name: Upload security reports
         uses: actions/upload-artifact@v4
@@ -93,6 +94,7 @@ jobs:
           path: |
             frontend/npm-audit-report.json
             frontend/snyk-report.json
+          if-no-files-found: ignore
 
   secrets-scan:
     name: Scan for Secrets
@@ -226,7 +228,7 @@ jobs:
         
       - name: Check Python licenses
         run: |
-          pip install -e .
+          pip install -e "python_engine[dev]"
           pip-licenses --format=json --output-file=python-licenses.json
           
       - name: Setup Node.js

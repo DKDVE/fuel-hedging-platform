@@ -5,14 +5,14 @@ on:
     branches: [main, develop]
     paths:
       - 'python_engine/**'
-      - 'pyproject.toml'
+      - 'python_engine/pyproject.toml'
       - 'Dockerfile'
       - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [main, develop]
     paths:
       - 'python_engine/**'
-      - 'pyproject.toml'
+      - 'python_engine/pyproject.toml'
 
 env:
   PYTHON_VERSION: '3.11'
@@ -158,8 +158,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: python_engine
-          file: python_engine/Dockerfile.prod
+          context: .
+          file: Dockerfile
           push: ${{ github.event_name == 'push' }}
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/fuel-hedging-api:latest
@@ -184,7 +184,7 @@ jobs:
       - name: Health check
         run: |
           for i in {1..10}; do
-            if curl -f ${{ secrets.RENDER_API_URL }}/healthz; then
+            if curl -f ${{ secrets.RENDER_API_URL || 'https://hedge-api-o9t3.onrender.com' }}/health; then
               echo "✅ Deployment successful"
               exit 0
             fi
