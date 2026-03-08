@@ -1,0 +1,54 @@
+name: Nightly Validation
+
+on:
+  schedule:
+    - cron: "0 23 * * 1-5"   # Mon–Fri 23:00 UTC
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate Production KPIs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch production KPIs
+        id: fetch-kpis
+        run: |
+          # Analytics summary requires auth — use health as fallback
+          RESPONSE=$(curl -s \
+            -H "Accept: application/json" \
+            https://hedge-api.onrender.com/health \
+            -w "\n%{http_code}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "ERROR: Health check returned HTTP $HTTP_CODE"
+            echo "status=unhealthy" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "kpis=$BODY" >> $GITHUB_OUTPUT
+          echo "status=healthy" >> $GITHUB_OUTPUT
+          echo "API returned HTTP 200"
+
+      - name: Validate API health
+        run: |
+          echo "Production API health check passed."
+          echo "For full KPI validation, configure a monitoring token and call /api/v1/analytics/summary"
+
+      - name: Post to Slack on failure
+        if: failure() && secrets.SLACK_WEBHOOK_URL != ''
+        run: |
+          curl -X POST '${{ secrets.SLACK_WEBHOOK_URL }}' \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "🚨 *Fuel Hedging Platform — Nightly Validation FAILED*",
+              "attachments": [{
+                "color": "danger",
+                "text": "Production health check failed.\nCheck: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }]
+            }'

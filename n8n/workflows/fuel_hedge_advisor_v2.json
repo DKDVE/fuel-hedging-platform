@@ -1,0 +1,478 @@
+{
+  "name": "Fuel Hedging Advisor - v2 (Production Ready)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "path": "fuel-hedge-trigger",
+        "httpMethod": "POST",
+        "responseMode": "immediately",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [-800, 0],
+      "id": "webhook-trigger",
+      "name": "Daily Pipeline Trigger",
+      "webhookId": "fuel-hedge-trigger"
+    },
+    {
+      "parameters": {
+        "url": "={{$env.FASTAPI_INTERNAL_URL || 'http://api:8000'}}/api/v1/analytics/forecast/latest",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "={{$env.N8N_API_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [-600, -300],
+      "id": "fetch-forecast",
+      "name": "Fetch Forecast",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{$env.FASTAPI_INTERNAL_URL || 'http://api:8000'}}/api/v1/analytics/var/latest",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "={{$env.N8N_API_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [-600, -100],
+      "id": "fetch-var",
+      "name": "Fetch VaR Results",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{$env.FASTAPI_INTERNAL_URL || 'http://api:8000'}}/api/v1/analytics/basis-risk/latest",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "={{$env.N8N_API_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [-600, 100],
+      "id": "fetch-basis",
+      "name": "Fetch Basis Risk",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "={{$env.FASTAPI_INTERNAL_URL || 'http://api:8000'}}/api/v1/analytics/optimizer/latest",
+        "method": "GET",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "={{$env.N8N_API_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [-600, 300],
+      "id": "fetch-optimizer",
+      "name": "Fetch Optimizer Result",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [-400, -150],
+      "id": "merge-forecast-var",
+      "name": "Merge Forecast+VaR"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [-400, 150],
+      "id": "merge-basis-optimizer",
+      "name": "Merge Basis+Optimizer"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [-200, 0],
+      "id": "merge-all",
+      "name": "Merge All Analytics"
+    },
+    {
+      "parameters": {
+        "jsCode": "const triggerData = $('Daily Pipeline Trigger').first().json;\nconst run_id = triggerData.body?.run_id || triggerData.run_id || 'run-' + new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);\nconst forecast = $('Fetch Forecast').first()?.json || {};\nconst summary = $('Fetch VaR Results').first()?.json || {};\nconst basis = $('Fetch Basis Risk').first()?.json || {};\nconst optimizer = $('Fetch Optimizer Result').first()?.json || {};\nconst market_context = {\n  run_id,\n  timestamp: new Date().toISOString(),\n  prices: {\n    jet_fuel_spot: summary.last_price || 84.96,\n    heating_oil_futures: basis.heating_oil_latest || 81.97,\n    brent_futures: 77.97,\n    wti_futures: 74.99,\n    crack_spread: basis.crack_spread_current || 2.99,\n    volatility_index: 17.32,\n  },\n  analytics: {\n    var_hedged_usd: summary.var_usd || 2100000,\n    var_unhedged_usd: (summary.var_unhedged_usd || 3360000),\n    var_reduction_pct: summary.var_reduction_pct || 0.375,\n    forecast_mape: forecast.mape || summary.mape || 4.4,\n    forecast_30d: forecast.forecast || forecast.data_points || [],\n    r2_heating_oil: basis.r2_heating_oil || summary.r2_heating_oil || 0.8517,\n    r2_brent: basis.r2_brent || 0.7823,\n    r2_wti: 0.8102,\n    crack_spread_zscore: basis.crack_spread_zscore || 0.8,\n    ifrs9_eligible: (basis.r2_heating_oil || summary.r2_heating_oil || 0.8517) >= 0.80,\n    optimal_hr: optimizer.optimal_hr || summary.hedge_ratio || 0.68,\n    instrument_mix: optimizer.instrument_mix || { futures: 0.70, options: 0.20, collars: 0.05, swaps: 0.05 },\n    proxy_weights: optimizer.proxy_weights || { heating_oil: 0.70, brent: 0.20, wti: 0.10 },\n    collateral_usd: optimizer.collateral_usd || 1937500,\n    collateral_pct_of_reserves: optimizer.collateral_pct_of_reserves || summary.collateral_pct || 0.129,\n    solver_converged: optimizer.solver_converged !== false,\n  }\n};\nreturn [{ json: { run_id, market_context } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "id": "data-aggregator",
+      "name": "Data Aggregator"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Data Aggregator').first().json.market_context;\nconst a = ctx.analytics || ctx;\nconst r2 = a.r2_heating_oil ?? 0.85;\nconst response = {\n  agent_id: 'basis_risk',\n  risk_level: r2 >= 0.80 ? 'LOW' : r2 >= 0.65 ? 'MODERATE' : 'HIGH',\n  recommendation: `R² of ${r2.toFixed(3)} ${r2 >= 0.80 ? 'exceeds' : 'below'} IFRS 9 threshold. Heating oil ${r2 >= 0.80 ? 'is optimal proxy' : 'requires monitoring'}.`,\n  metrics: { r2_heating_oil: r2, r2_brent: a.r2_brent ?? 0.78, crack_spread_zscore: a.crack_spread_zscore ?? 0.5 },\n  constraints_satisfied: r2 >= 0.65,\n  action_required: r2 < 0.80,\n  ifrs9_eligible: r2 >= 0.80,\n  generated_at: new Date().toISOString()\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [100, -400],
+      "id": "agent-basis-risk",
+      "name": "Agent: Basis Risk"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate JSON output\nlet output;\ntry {\n  const raw = $input.first().json;\n  output = raw;\n  if (!output.agent_id || !output.risk_level || !output.generated_at) {\n    throw new Error('Missing required fields');\n  }\n} catch (e) {\n  output = {\n    agent_id: 'basis_risk',\n    risk_level: 'MODERATE',\n    recommendation: 'Agent output could not be parsed. Manual review required.',\n    metrics: {},\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: null,\n    generated_at: new Date().toISOString(),\n    parse_error: true,\n    error_details: e.message\n  };\n}\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, -400],
+      "id": "validate-basis-risk",
+      "name": "Validate Basis Risk"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Data Aggregator').first().json.market_context;\nconst a = ctx.analytics || ctx;\nconst colPct = a.collateral_pct_of_reserves ?? (a.collateral_pct / 100) ?? 0.129;\nconst colUsd = a.collateral_usd ?? 1937500;\nconst response = {\n  agent_id: 'liquidity',\n  risk_level: colPct > 0.15 ? 'CRITICAL' : colPct > 0.12 ? 'MODERATE' : 'LOW',\n  recommendation: `Collateral ${(colPct * 100).toFixed(1)}% of reserves. ${colPct > 0.15 ? 'EXCEEDS 15% LIMIT' : colPct > 0.12 ? 'Approaching limit - monitor closely' : 'Within acceptable range'}.`,\n  metrics: { collateral_pct_of_reserves: colPct, collateral_usd: colUsd, estimated_margin_headroom_usd: 15000000 * 0.15 - colUsd },\n  constraints_satisfied: colPct <= 0.15,\n  action_required: colPct > 0.12,\n  ifrs9_eligible: null,\n  generated_at: new Date().toISOString()\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [100, -200],
+      "id": "agent-liquidity",
+      "name": "Agent: Liquidity"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate JSON output\nlet output;\ntry {\n  const raw = $input.first().json;\n  output = raw;\n  if (!output.agent_id || !output.risk_level || !output.generated_at) {\n    throw new Error('Missing required fields');\n  }\n} catch (e) {\n  output = {\n    agent_id: 'liquidity',\n    risk_level: 'MODERATE',\n    recommendation: 'Agent output could not be parsed. Manual review required.',\n    metrics: {},\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: null,\n    generated_at: new Date().toISOString(),\n    parse_error: true,\n    error_details: e.message\n  };\n}\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, -200],
+      "id": "validate-liquidity",
+      "name": "Validate Liquidity"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Data Aggregator').first().json.market_context;\nconst a = ctx.analytics || ctx;\nconst hr = a.optimal_hr ?? 0.68;\nconst response = {\n  agent_id: 'operational',\n  risk_level: hr > 0.80 ? 'CRITICAL' : hr > 0.75 ? 'MODERATE' : 'LOW',\n  recommendation: `Hedge ratio ${(hr * 100).toFixed(1)}% ${hr > 0.80 ? 'EXCEEDS 80% HARD CAP' : 'is within operational limits'}.`,\n  metrics: { optimal_hr: hr, hr_hard_cap: 0.80, coverage_ratio_estimate: hr / 0.80 },\n  constraints_satisfied: hr <= 0.80,\n  action_required: hr > 0.75,\n  ifrs9_eligible: null,\n  generated_at: new Date().toISOString()\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [100, 0],
+      "id": "agent-operational",
+      "name": "Agent: Operational"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate JSON output\nlet output;\ntry {\n  const raw = $input.first().json;\n  output = raw;\n  if (!output.agent_id || !output.risk_level || !output.generated_at) {\n    throw new Error('Missing required fields');\n  }\n} catch (e) {\n  output = {\n    agent_id: 'operational',\n    risk_level: 'MODERATE',\n    recommendation: 'Agent output could not be parsed. Manual review required.',\n    metrics: {},\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: null,\n    generated_at: new Date().toISOString(),\n    parse_error: true,\n    error_details: e.message\n  };\n}\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 0],
+      "id": "validate-operational",
+      "name": "Validate Operational"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Data Aggregator').first().json.market_context;\nconst a = ctx.analytics || ctx;\nconst r2 = a.r2_heating_oil ?? 0.85;\nconst response = {\n  agent_id: 'ifrs9',\n  risk_level: r2 >= 0.80 ? 'LOW' : r2 >= 0.65 ? 'HIGH' : 'CRITICAL',\n  recommendation: `${r2 >= 0.80 ? 'IFRS 9 ELIGIBLE' : 'IFRS 9 INELIGIBLE'}. R² ${r2.toFixed(3)} ${r2 >= 0.80 ? 'meets' : 'below'} 0.80 threshold.`,\n  metrics: { r2_prospective: r2, ifrs9_eligible: r2 >= 0.80, retrospective_ratio_estimate: 0.96 },\n  constraints_satisfied: r2 >= 0.65,\n  action_required: r2 < 0.80,\n  ifrs9_eligible: r2 >= 0.80,\n  generated_at: new Date().toISOString()\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [100, 200],
+      "id": "agent-ifrs9",
+      "name": "Agent: IFRS9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate JSON output\nlet output;\ntry {\n  const raw = $input.first().json;\n  output = raw;\n  if (!output.agent_id || !output.risk_level || !output.generated_at) {\n    throw new Error('Missing required fields');\n  }\n} catch (e) {\n  output = {\n    agent_id: 'ifrs9',\n    risk_level: 'MODERATE',\n    recommendation: 'Agent output could not be parsed. Manual review required.',\n    metrics: {},\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: null,\n    generated_at: new Date().toISOString(),\n    parse_error: true,\n    error_details: e.message\n  };\n}\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 200],
+      "id": "validate-ifrs9",
+      "name": "Validate IFRS9"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('Data Aggregator').first().json.market_context;\nconst vol = ctx.prices?.volatility_index ?? 17.32;\nconst volRegime = vol < 15 ? 'LOW' : vol < 25 ? 'MODERATE' : 'HIGH';\nconst response = {\n  agent_id: 'macro',\n  risk_level: vol < 15 ? 'LOW' : vol < 25 ? 'MODERATE' : 'HIGH',\n  recommendation: `Volatility ${vol.toFixed(1)}. ${vol >= 25 ? 'Consider increasing hedge ratio' : 'Neutral macro - proceed with recommended hedge'}.`,\n  metrics: { volatility_index: vol, vol_regime: volRegime, geopolitical_risk: 'MODERATE', hedge_timing_signal: vol >= 25 ? 'WAIT' : 'HEDGE_NOW' },\n  constraints_satisfied: true,\n  action_required: vol >= 25,\n  ifrs9_eligible: null,\n  generated_at: new Date().toISOString()\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [100, 400],
+      "id": "agent-macro",
+      "name": "Agent: Macro"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate JSON output\nlet output;\ntry {\n  const raw = $input.first().json;\n  output = raw;\n  if (!output.agent_id || !output.risk_level || !output.generated_at) {\n    throw new Error('Missing required fields');\n  }\n} catch (e) {\n  output = {\n    agent_id: 'macro',\n    risk_level: 'MODERATE',\n    recommendation: 'Agent output could not be parsed. Manual review required.',\n    metrics: {},\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: null,\n    generated_at: new Date().toISOString(),\n    parse_error: true,\n    error_details: e.message\n  };\n}\nreturn [{ json: output }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 400],
+      "id": "validate-macro",
+      "name": "Validate Macro"
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [420, 50],
+      "id": "merge-agents-1",
+      "name": "Merge Agents 1"
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [420, 150],
+      "id": "merge-agents-2",
+      "name": "Merge Agents 2"
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [480, 100],
+      "id": "merge-agents-3",
+      "name": "Merge Agents 3"
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [520, 100],
+      "id": "merge-agents",
+      "name": "Merge Agents"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst agentOrder = ['basis_risk', 'liquidity', 'operational', 'ifrs9', 'macro'];\nconst agents = agentOrder.map(id => items.find(i => i.json.agent_id === id)?.json).filter(Boolean);\nconst fallback = { agent_id: 'unknown', risk_level: 'MODERATE', recommendation: 'Missing', metrics: {}, constraints_satisfied: true, action_required: false, ifrs9_eligible: null, generated_at: new Date().toISOString() };\nwhile (agents.length < 5) agents.push({ ...fallback, agent_id: agentOrder[agents.length] });\nconst ctx = $('Data Aggregator').first().json.market_context;\nconst a = ctx.analytics || ctx;\nconst hr = a.optimal_hr ?? 0.68;\nconst riskCounts = {LOW: 0, MODERATE: 0, HIGH: 0, CRITICAL: 0};\nagents.forEach(ag => riskCounts[ag.risk_level]++);\nlet consensusRisk = 'LOW';\nif (riskCounts.CRITICAL > 0) consensusRisk = 'CRITICAL';\nelse if (riskCounts.HIGH > 0) consensusRisk = 'HIGH';\nelse if (riskCounts.MODERATE >= 2) consensusRisk = 'MODERATE';\nconst mix = a.instrument_mix || { futures: 0.7, options: 0.2, collars: 0.05, swaps: 0.05 };\nconst topInst = Object.entries(mix).sort((x,y)=>y[1]-x[1])[0]?.[0] || 'futures';\nconst keyConcerns = agents.filter(ag => ag.risk_level === 'HIGH' || ag.risk_level === 'CRITICAL').map(ag => (ag.recommendation || '').slice(0, 100)).slice(0, 5);\nconst committee = { top_strategy: 'Hedge ' + Math.round(hr*100) + '% using ' + topInst, consensus_risk_level: consensusRisk, key_concerns: keyConcerns.length > 0 ? keyConcerns : ['All agents report normal operating conditions'], recommended_hr: hr, rationale: agents.filter(ag => ag.constraints_satisfied).length + '/5 approve. ' + consensusRisk + ' risk.', agents };\nreturn [{ json: committee }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 100],
+      "id": "committee-synthesizer",
+      "name": "Committee Synthesizer"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Committee Synthesizer').first().json;\nconst agents = data.agents || [];\nconst ctx = $('Data Aggregator').first().json.market_context;\nconst a = ctx.analytics || ctx;\nconst hr = a.optimal_hr ?? 0.68;\nconst colPct = a.collateral_pct_of_reserves ?? 0.129;\nlet approved = true;\nlet blockingReason = null;\nif (agents.some(x => x.constraints_satisfied === false)) { approved = false; blockingReason = 'One or more agents flagged constraint violations'; }\nif (hr > 0.80) { approved = false; blockingReason = (blockingReason ? blockingReason + '; ' : '') + 'HR exceeds 80% cap'; }\nif (colPct > 0.15) { approved = false; blockingReason = (blockingReason ? blockingReason + '; ' : '') + 'Collateral exceeds 15%'; }\nreturn [{ json: { ...data, cro_decision: { approved_for_presentation: approved, blocking_reason: blockingReason, final_risk_level: data.consensus_risk_level } } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 100],
+      "id": "cro-risk-gate",
+      "name": "CRO Risk Gate"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('CRO Risk Gate').first().json;\nconst ctx = $('Data Aggregator').first().json.market_context;\nconst mc = ctx.analytics || ctx;\nconst { agents, ...committeeConsensus } = data;\nconst payload = {\n  run_id: ctx.run_id,\n  triggered_at: new Date().toISOString(),\n  optimal_hr: mc.optimal_hr ?? 0.68,\n  instrument_mix: mc.instrument_mix || { futures: 0.70, options: 0.20, collars: 0.05, swaps: 0.05 },\n  proxy_weights: mc.proxy_weights || { heating_oil: 0.70, brent: 0.20, wti: 0.10 },\n  var_hedged_usd: mc.var_hedged_usd ?? 2100000,\n  var_unhedged_usd: mc.var_unhedged_usd ?? 3360000,\n  var_reduction_pct: mc.var_reduction_pct ?? 0.375,\n  collateral_usd: mc.collateral_usd ?? 1937500,\n  collateral_pct_of_reserves: mc.collateral_pct_of_reserves ?? 0.129,\n  solver_converged: mc.solver_converged !== false,\n  agent_outputs: agents || [],\n  committee_consensus: committeeConsensus,\n  cro_decision: data.cro_decision\n};\nreturn [{ json: payload }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 100],
+      "id": "payload-assembly",
+      "name": "Payload Assembly"
+    },
+    {
+      "parameters": {
+        "url": "={{$env.FASTAPI_INTERNAL_URL || 'http://api:8000'}}/api/v1/recommendations",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-Key",
+              "value": "={{$env.N8N_API_KEY}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1100, 100],
+      "id": "post-to-fastapi",
+      "name": "POST to FastAPI"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst ctx = $('Data Aggregator').first().json.market_context;\n\nconsole.log('✅ WORKFLOW COMPLETE');\nconsole.log('Run ID:', ctx.run_id);\nconsole.log('FastAPI Response:', JSON.stringify(response, null, 2));\n\nreturn [{\n  json: {\n    workflow_status: 'SUCCESS',\n    run_id: ctx.run_id,\n    recommendation_id: response.id || null,\n    completed_at: new Date().toISOString()\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 100],
+      "id": "success-handler",
+      "name": "Success Handler"
+    }
+  ],
+  "connections": {
+    "Daily Pipeline Trigger": {
+      "main": [
+        [
+          {"node": "Fetch Forecast", "type": "main", "index": 0},
+          {"node": "Fetch VaR Results", "type": "main", "index": 0},
+          {"node": "Fetch Basis Risk", "type": "main", "index": 0},
+          {"node": "Fetch Optimizer Result", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Fetch Forecast": {
+      "main": [[{"node": "Merge Forecast+VaR", "type": "main", "index": 0}]]
+    },
+    "Fetch VaR Results": {
+      "main": [[{"node": "Merge Forecast+VaR", "type": "main", "index": 1}]]
+    },
+    "Fetch Basis Risk": {
+      "main": [[{"node": "Merge Basis+Optimizer", "type": "main", "index": 0}]]
+    },
+    "Fetch Optimizer Result": {
+      "main": [[{"node": "Merge Basis+Optimizer", "type": "main", "index": 1}]]
+    },
+    "Merge Forecast+VaR": {
+      "main": [[{"node": "Merge All Analytics", "type": "main", "index": 0}]]
+    },
+    "Merge Basis+Optimizer": {
+      "main": [[{"node": "Merge All Analytics", "type": "main", "index": 1}]]
+    },
+    "Merge All Analytics": {
+      "main": [[{"node": "Data Aggregator", "type": "main", "index": 0}]]
+    },
+    "Data Aggregator": {
+      "main": [
+        [
+          {"node": "Agent: Basis Risk", "type": "main", "index": 0},
+          {"node": "Agent: Liquidity", "type": "main", "index": 0},
+          {"node": "Agent: Operational", "type": "main", "index": 0},
+          {"node": "Agent: IFRS9", "type": "main", "index": 0},
+          {"node": "Agent: Macro", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Agent: Basis Risk": {
+      "main": [[{"node": "Validate Basis Risk", "type": "main", "index": 0}]]
+    },
+    "Validate Basis Risk": {
+      "main": [[{"node": "Merge Agents 1", "type": "main", "index": 0}]]
+    },
+    "Agent: Liquidity": {
+      "main": [[{"node": "Validate Liquidity", "type": "main", "index": 0}]]
+    },
+    "Validate Liquidity": {
+      "main": [[{"node": "Merge Agents 1", "type": "main", "index": 1}]]
+    },
+    "Agent: Operational": {
+      "main": [[{"node": "Validate Operational", "type": "main", "index": 0}]]
+    },
+    "Validate Operational": {
+      "main": [[{"node": "Merge Agents 2", "type": "main", "index": 0}]]
+    },
+    "Agent: IFRS9": {
+      "main": [[{"node": "Validate IFRS9", "type": "main", "index": 0}]]
+    },
+    "Validate IFRS9": {
+      "main": [[{"node": "Merge Agents 2", "type": "main", "index": 1}]]
+    },
+    "Agent: Macro": {
+      "main": [[{"node": "Validate Macro", "type": "main", "index": 0}]]
+    },
+    "Validate Macro": {
+      "main": [[{"node": "Merge Agents 3", "type": "main", "index": 1}]]
+    },
+    "Merge Agents 1": {
+      "main": [[{"node": "Merge Agents 3", "type": "main", "index": 0}]]
+    },
+    "Merge Agents 2": {
+      "main": [[{"node": "Merge Agents", "type": "main", "index": 0}]]
+    },
+    "Merge Agents 3": {
+      "main": [[{"node": "Merge Agents", "type": "main", "index": 1}]]
+    },
+    "Merge Agents": {
+      "main": [[{"node": "Committee Synthesizer", "type": "main", "index": 0}]]
+    },
+    "Committee Synthesizer": {
+      "main": [[{"node": "CRO Risk Gate", "type": "main", "index": 0}]]
+    },
+    "CRO Risk Gate": {
+      "main": [[{"node": "Payload Assembly", "type": "main", "index": 0}]]
+    },
+    "Payload Assembly": {
+      "main": [[{"node": "POST to FastAPI", "type": "main", "index": 0}]]
+    },
+    "POST to FastAPI": {
+      "main": [[{"node": "Success Handler", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

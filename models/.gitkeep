@@ -1,0 +1,5 @@
+# Model artifacts directory
+# ML models are committed separately via CI/CD workflows
+# Training happens in GitHub Actions, inference happens on Render
+
+.gitkeep

@@ -1,0 +1,98 @@
+"""
+Application configuration.
+Loads from environment variables with sensible defaults.
+"""
+
+import os
+from typing import Optional
+
+
+class Settings:
+    """Application settings loaded from environment variables."""
+
+    # Database — no default with real credentials; use .env
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://hedgeuser:CHANGE_ME@localhost:5432/hedge_db"
+    )
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+    # JWT Authentication
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production-min-32-chars")
+    ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "240"))
+    REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+    # Aliases for auth module
+    @property
+    def JWT_SECRET_KEY(self) -> str:
+        return self.SECRET_KEY
+
+    @property
+    def JWT_ALGORITHM(self) -> str:
+        return self.ALGORITHM
+
+    # Real-time Data Layer Configuration
+    USE_LIVE_FEED: bool = os.getenv("USE_LIVE_FEED", "true").lower() == "true"
+    MASSIVE_API_KEY: Optional[str] = os.getenv("MASSIVE_API_KEY", None)
+    EIA_API_KEY: Optional[str] = os.getenv("EIA_API_KEY", None)
+    CME_API_KEY: Optional[str] = os.getenv("CME_API_KEY", None)
+    ICE_API_KEY: Optional[str] = os.getenv("ICE_API_KEY", None)
+    
+    # Data Source Priority (when USE_LIVE_FEED=true)
+    USE_YAHOO_FINANCE: bool = os.getenv("USE_YAHOO_FINANCE", "true").lower() == "true"
+    USE_EIA_API: bool = os.getenv("USE_EIA_API", "true").lower() == "true"
+    USE_SIMULATION_FALLBACK: bool = os.getenv("USE_SIMULATION_FALLBACK", "true").lower() == "true"
+    
+    # Yahoo Finance Configuration
+    YAHOO_FINANCE_UPDATE_INTERVAL: int = int(os.getenv("YAHOO_FINANCE_UPDATE_INTERVAL", "60"))
+    YAHOO_FINANCE_CACHE_TTL: int = int(os.getenv("YAHOO_FINANCE_CACHE_TTL", "60"))
+    MAX_YAHOO_REQUESTS_PER_HOUR: int = int(os.getenv("MAX_YAHOO_REQUESTS_PER_HOUR", "100"))
+    
+    # EIA API Configuration
+    EIA_UPDATE_INTERVAL: int = int(os.getenv("EIA_UPDATE_INTERVAL", "86400"))  # Once per day
+    MAX_EIA_REQUESTS_PER_HOUR: int = int(os.getenv("MAX_EIA_REQUESTS_PER_HOUR", "150"))
+
+    # Simulation parameters (used when USE_LIVE_FEED=false)
+    SIMULATION_INTERVAL_SECONDS: float = float(os.getenv("SIMULATION_INTERVAL_SECONDS", "2.0"))
+    SIMULATION_INITIAL_PRICE: float = float(os.getenv("SIMULATION_INITIAL_PRICE", "85.0"))
+    SIMULATION_VOLATILITY: float = float(os.getenv("SIMULATION_VOLATILITY", "0.02"))
+
+    # n8n Integration
+    N8N_WEBHOOK_URL: str = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/fuel-hedge-advisor")
+    N8N_INTERNAL_URL: str = os.getenv("N8N_INTERNAL_URL", "http://n8n:5678")
+    N8N_TRIGGER_PATH: str = os.getenv("N8N_TRIGGER_PATH", "/webhook/fuel-hedge-trigger")
+    N8N_WEBHOOK_SECRET: str = os.getenv("N8N_WEBHOOK_SECRET", "change_me_in_production")
+
+    # API Configuration
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    FRONTEND_ORIGIN: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    API_INTERNAL_URL: str = os.getenv("API_INTERNAL_URL", "http://api:8000")
+    CORS_ORIGINS: list[str] = os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:3000"
+    ).split(",")
+    
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    # Domain constants (from .cursorrules)
+    HR_HARD_CAP: float = 0.80
+    HR_SOFT_WARN: float = 0.70
+    COLLATERAL_LIMIT: float = 0.15
+    IFRS9_R2_MIN_PROSPECTIVE: float = 0.80
+    IFRS9_R2_WARN: float = 0.65
+    IFRS9_RETRO_LOW: float = 0.80
+    IFRS9_RETRO_HIGH: float = 1.25
+    MAPE_TARGET: float = 8.0
+    MAPE_ALERT: float = 10.0
+    VAR_REDUCTION_TARGET: float = 0.40
+    MAX_COVERAGE_RATIO: float = 1.10
+    PIPELINE_TIMEOUT_MINUTES: int = 15
+
+
+settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Dependency for FastAPI routes to access settings."""
+    return settings

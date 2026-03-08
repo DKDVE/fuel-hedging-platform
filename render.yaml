@@ -1,0 +1,95 @@
+# render.yaml
+# Render infrastructure definition for fuel-hedging-platform.
+#
+# IMPORTANT: All secrets use sync: false and must be set manually
+# in the Render dashboard. Never set real values here.
+# See docs/RUNBOOK.md for the list of required secrets.
+
+services:
+  # ── FastAPI Backend ─────────────────────────────────────────────────────────
+  - type: web
+    name: hedge-api
+    runtime: docker
+    dockerfilePath: python_engine/Dockerfile.prod
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: false   # CI controls deploys via deploy hooks
+
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hedge-postgres
+          property: connectionString
+
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: hedge-redis
+          property: connectionString
+
+      # Secrets — set manually in Render dashboard
+      - key: SECRET_KEY
+        sync: false
+      - key: N8N_WEBHOOK_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: EIA_API_KEY
+        sync: false
+
+      # Configuration
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: N8N_INTERNAL_URL
+        fromService:
+          type: worker
+          name: hedge-n8n
+          property: hostport
+      - key: N8N_TRIGGER_PATH
+        value: /webhook/fuel-hedge-trigger
+      - key: FRONTEND_ORIGIN
+        value: https://DKDVE.github.io
+
+  # ── n8n Background Worker ────────────────────────────────────────────────────
+  - type: worker
+    name: hedge-n8n
+    runtime: image
+    image:
+      url: docker.io/n8nio/n8n:latest
+    plan: starter
+    autoDeploy: false
+
+    disk:
+      name: n8n-data
+      mountPath: /home/node/.n8n
+      sizeGB: 1
+
+    envVars:
+      - key: N8N_API_KEY
+        sync: false              # same value as N8N_WEBHOOK_SECRET in FastAPI
+      - key: FASTAPI_INTERNAL_URL
+        fromService:
+          type: web
+          name: hedge-api
+          property: hostport
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: N8N_ENCRYPTION_KEY
+        sync: false
+      - key: N8N_SECURE_COOKIE
+        value: "false"
+      - key: WEBHOOK_URL
+        sync: false              # Set to your Render n8n service public URL
+
+databases:
+  - name: hedge-postgres
+    plan: starter
+    databaseName: hedge_db
+    user: hedge_user
+    postgresMajorVersion: 15
+
+  - name: hedge-redis
+    plan: free

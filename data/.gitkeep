@@ -1,0 +1,5 @@
+# Data directory
+# fuel_hedging_dataset.csv will be placed here
+# 1,827 daily observations from 2020-01-01 to 2024-12-31
+
+.gitkeep

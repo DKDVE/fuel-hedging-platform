@@ -1,0 +1,75 @@
+# python_engine/Dockerfile.prod
+# Production Dockerfile for Render deployment.
+# Differences from dev Dockerfile:
+# - Multi-stage build (smaller final image)
+# - Non-root user
+# - No dev tools installed
+# - Gunicorn + uvicorn workers (not uvicorn --reload)
+
+# Stage 1: Builder
+# Build from python_engine context (dockerContext in render.yaml can be . or python_engine)
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-core.txt requirements-analytics.txt ./
+RUN pip install --no-cache-dir --user -r requirements.txt \
+    -r requirements-core.txt \
+    -r requirements-analytics.txt gunicorn
+
+# Stage 2: Runtime
+FROM python:3.11-slim AS runtime
+
+# Security: run as non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /root/.local /home/appuser/.local
+
+# Copy application code (paths relative to dockerContext=.)
+COPY python_engine/app/ ./app/
+COPY python_engine/alembic/ ./alembic/
+COPY python_engine/alembic.ini .
+COPY python_engine/manage.py .
+
+# Copy scripts and data
+COPY python_engine/scripts/ ./scripts/
+COPY data/ /data/
+RUN mkdir -p /models
+
+# Install only runtime system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Switch to non-root
+USER appuser
+ENV PATH="/home/appuser/.local/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Render provides PORT env var
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Production server: gunicorn + uvicorn workers
+# Render Starter plan: 0.5 CPU, 512MB RAM → 2 workers max
+CMD ["gunicorn", "app.main:app", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--workers", "2", \
+     "--bind", "0.0.0.0:8000", \
+     "--timeout", "120", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-"]

@@ -1,0 +1,93 @@
+name: LSTM Weekly Retraining
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"   # Sunday 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  retrain:
+    name: Retrain LSTM Model
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: python_engine
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: python_engine/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-core.txt -r requirements-analytics.txt 2>/dev/null || pip install -r requirements.txt
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+
+      - name: Fetch latest EIA data
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        run: |
+          echo "EIA update skipped (optional)"
+          # python -c "
+          # import sys, os
+          # sys.path.insert(0, '.')
+          # if os.getenv('EIA_API_KEY') and os.getenv('EIA_API_KEY') != 'OPTIONAL_get_free_key_at_eia.gov':
+          #   from app.clients.eia_client import EIAClient
+          #   client = EIAClient()
+          #   client.update_dataset('../data/fuel_hedging_dataset.csv')
+          #   print('Dataset updated from EIA API')
+          # else:
+          #   print('EIA_API_KEY not set — using existing dataset')
+          # " || echo "EIA update skipped"
+
+      - name: Retrain model
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          import pandas as pd
+          from pathlib import Path
+
+          df = pd.read_csv('../data/fuel_hedging_dataset.csv', parse_dates=['Date'])
+          print(f'Training on {len(df)} rows')
+
+          from app.services.train_lstm import train_lstm_model
+
+          model_path = Path('../models/lstm_model.h5')
+          metrics = train_lstm_model(
+            csv_path=Path('../data/fuel_hedging_dataset.csv'),
+            model_output_path=model_path,
+            epochs=50
+          )
+          mape = metrics.get('mape', 99)
+          print(f'Training complete. MAPE: {mape:.2f}%')
+
+          MAX_ACCEPTABLE_MAPE = 12.0
+          if mape > MAX_ACCEPTABLE_MAPE:
+            print(f'BLOCKING: MAPE {mape:.2f}% exceeds {MAX_ACCEPTABLE_MAPE}% threshold')
+            sys.exit(1)
+
+          print(f'Model saved. MAPE: {mape:.2f}%')
+          "
+
+      - name: Commit model artifacts
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          cd ..
+          git add models/*.h5 2>/dev/null || true
+          git add data/fuel_hedging_dataset.csv 2>/dev/null || true
+          git diff --staged --stat || true
+          git commit -m "chore(models): weekly retrain $(date -u +%Y-%m-%d)
+
+          Automated weekly LSTM retraining.
+          Triggered by: cron schedule" || echo "Nothing to commit"
+          git push || echo "Push skipped (no changes or GH_PAT not set)"

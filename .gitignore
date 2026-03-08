@@ -1,0 +1,82 @@
+# Environment files — NEVER commit these
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+.env.test
+.env.*
+*.env
+!.env.example
+
+# Python secrets and caches
+python_engine/venv/
+**/venv/
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+htmlcov/
+.coverage
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/build/
+.npm/
+
+# Docker volumes (never commit DB data)
+postgres_data/
+redis_data/
+n8n_data/
+
+# Model artifacts (large files — use Git LFS or Render disk)
+python_engine/models/*.h5
+python_engine/models/*.pkl
+python_engine/models/*.joblib
+python_engine/models/*.bin
+models/*.h5
+models/*.pkl
+models/*.weights
+# Exception: commit the model metadata JSON (small, no weights)
+!python_engine/models/*.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Secrets baseline (commit this — it's safe, contains only hashes)
+# .secrets.baseline   ← intentionally NOT ignored
+
+# Terraform / infra state
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.bak
+.temp/
+=*

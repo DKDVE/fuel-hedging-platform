@@ -1,0 +1,148 @@
+version: '3.8'
+
+networks:
+  hedge-net:
+    driver: bridge
+
+services:
+  postgres:
+    networks:
+      - hedge-net
+    image: timescale/timescaledb:latest-pg15
+    container_name: hedge-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hedgeuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-hedge_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hedgeuser -d hedge_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: hedge-redis
+    networks:
+      - hedge-net
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    networks:
+      - hedge-net
+    build:
+      context: ./python_engine
+      dockerfile: Dockerfile
+    container_name: hedge-api
+    environment:
+      # Database — all secrets from .env
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hedgeuser}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hedge_db}
+      REDIS_URL: redis://redis:6379/0
+      
+      # JWT Auth — SECRET_KEY from .env
+      SECRET_KEY: ${JWT_SECRET_KEY}
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 240
+      
+      # Real-time Data Layer Configuration
+      USE_LIVE_FEED: "true"
+      USE_YAHOO_FINANCE: "true"
+      USE_EIA_API: "true"
+      USE_SIMULATION_FALLBACK: "true"
+      
+      # API Keys — from .env (optional)
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      
+      # Simulation parameters (used when USE_LIVE_FEED=false)
+      SIMULATION_INTERVAL_SECONDS: "2"
+      SIMULATION_INITIAL_PRICE: "85.0"
+      SIMULATION_VOLATILITY: "0.02"
+      
+      # n8n Integration (N8N_WEBHOOK_SECRET must match n8n's N8N_API_KEY)
+      N8N_WEBHOOK_URL: http://n8n:5678/webhook/fuel-hedge-advisor
+      N8N_INTERNAL_URL: http://n8n:5678
+      N8N_TRIGGER_PATH: /webhook/fuel-hedge-trigger
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET}
+      
+      # API Config
+      FRONTEND_ORIGIN: "http://localhost:5173"
+      CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./python_engine:/app
+      - ./data:/app/data
+    depends_on:
+      postgres:
+      
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Run once after first docker-compose up:
+    # docker exec hedge-api python scripts/seed_analytics_history.py
+
+  frontend:
+    networks:
+      - hedge-net
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: hedge-frontend
+    environment:
+      # Leave unset — frontend uses relative /api/v1 via Vite proxy
+      VITE_API_BASE_URL: ""
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+  n8n:
+    networks:
+      - hedge-net
+    image: n8nio/n8n:latest
+    container_name: hedge-n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5678
+      - GENERIC_TIMEZONE=UTC
+      - N8N_API_KEY=${N8N_WEBHOOK_SECRET}
+      - FASTAPI_INTERNAL_URL=http://api:8000
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_SECURE_COOKIE=false
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/home/node/.n8n/workflows
+
+volumes:
+  postgres_data:
+  n8n_data:

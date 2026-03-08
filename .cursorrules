@@ -1,0 +1,104 @@
+# ============================================================
+# .cursorrules — Fuel Hedging Platform
+# Cursor reads this automatically in every session.
+# DO NOT SHORTEN — every line prevents a bug or vulnerability.
+# ============================================================
+
+## PROJECT IDENTITY
+- Aviation fuel hedging optimization platform for an airline
+- Backend: FastAPI 0.110 + Python 3.11 + SQLAlchemy 2.0 async + Pydantic v2
+- Frontend: React 18 + TypeScript 5 + TailwindCSS 3 + React Query v5 + Recharts
+- Auth: JWT (HS256) in httpOnly cookies — NEVER localStorage
+- Database: PostgreSQL 15 + TimescaleDB extension
+- Deployment: GitHub Pages (frontend) + Render.com (backend)
+
+## DOMAIN CONSTANTS — never inline these values in code
+HR_HARD_CAP = 0.80
+HR_SOFT_WARN = 0.70
+COLLATERAL_LIMIT = 0.15
+IFRS9_R2_MIN_PROSPECTIVE = 0.80
+IFRS9_R2_WARN = 0.65
+IFRS9_RETRO_LOW = 0.80
+IFRS9_RETRO_HIGH = 1.25
+MAPE_TARGET = 8.0
+MAPE_ALERT = 10.0
+VAR_REDUCTION_TARGET = 0.40
+MAX_COVERAGE_RATIO = 1.10
+PIPELINE_TIMEOUT_MINUTES = 15
+
+## DATASET
+- File: data/fuel_hedging_dataset.csv
+- 1,827 daily observations: 2020-01-01 to 2024-12-31
+- Columns: Date, Jet_Fuel_Spot_USD_bbl, Heating_Oil_Futures_USD_bbl,
+           Brent_Crude_Futures_USD_bbl, WTI_Crude_Futures_USD_bbl,
+           Crack_Spread_USD_bbl, Volatility_Index_pct
+- Training split: 2020–2023 (1,461 rows)
+- Validation split: 2024 (366 rows)
+
+## PYTHON CODING RULES
+- All functions must have full type annotations (args + return type)
+- Use @dataclass(frozen=True) for all domain objects
+- Use Pydantic BaseModel for all API request/response schemas
+- model_config = ConfigDict(extra='forbid') on all Pydantic models
+- Custom exceptions only — never raise Exception() or ValueError() directly
+- Use structlog for all logging — never print()
+- Use httpx.AsyncClient for all external HTTP — never requests
+- Repository pattern: all DB access in repositories/ — never in routers or services
+- Dependency injection via FastAPI Depends() — never instantiate services inside functions
+- All DB operations must be async (await) — never sync SQLAlchemy in async context
+- Use alembic for all schema changes — never modify DB schema in application code
+
+## TYPESCRIPT CODING RULES
+- strict: true in tsconfig.json — no exceptions
+- No 'any' type — use 'unknown' and narrow, or define proper types
+- No non-null assertions (!.) without a preceding type guard
+- API types in src/types/api.ts — must exactly match backend Pydantic response schemas
+- All API calls through src/lib/api.ts (axios instance with interceptors)
+- Custom hooks for all SSE/WebSocket/data-fetching logic
+- React Hook Form + Zod for all forms
+- Error boundaries on every page component
+
+## SECURITY RULES — never violate
+- NEVER put secrets, API keys, or tokens in code, comments, or git
+- NEVER use string formatting to build SQL queries
+- NEVER use localStorage for sensitive data
+- ALWAYS validate and sanitize all inputs before processing
+- ALWAYS use parameterized queries via SQLAlchemy ORM
+- Rate limit every endpoint: auth 5/min, writes 20/min, reads 120/min
+- Return only {detail, error_code} in error responses — no stack traces
+- httpOnly + Secure + SameSite=Strict on all auth cookies
+
+## API CONVENTIONS
+- Base URL prefix: /api/v1/  (versioned from day one)
+- Auth: Bearer JWT in Authorization header for programmatic clients
+        httpOnly cookie 'access_token' for browser clients
+- All monetary values: USD, 2 decimal places, as float
+- All dates: ISO 8601 UTC strings (e.g. '2024-03-15T06:00:00Z')
+- Pagination: ?page=1&limit=50 (max limit 200)
+- Errors: HTTP 400 validation, 401 unauthenticated, 403 forbidden,
+          404 not found, 409 conflict, 422 schema invalid, 500 internal
+
+## FILE NAMING
+- Python: snake_case files/functions; PascalCase classes
+- React: PascalCase components (Button.tsx); camelCase hooks (useLivePrices.ts)
+- Tests: test_{module}.py (Python); {Component}.test.tsx (React)
+
+## AGENT OUTPUT CONTRACT — all 5 n8n agents must return this exact shape
+{
+  agent_id: string,        // 'basis_risk'|'liquidity'|'operational'|'ifrs9'|'macro'
+  risk_level: 'LOW'|'MODERATE'|'HIGH'|'CRITICAL',
+  recommendation: string,
+  metrics: Record<string, number>,
+  constraints_satisfied: boolean,
+  action_required: boolean,
+  ifrs9_eligible: boolean | null,
+  generated_at: string     // ISO 8601 UTC
+}
+
+## ARCHITECTURE REMINDER
+- Routers:     HTTP handling only — call service layer, return response
+- Services:    Business logic — call repositories + analytics modules
+- Repositories: DB access only — no business logic
+- Analytics:   Pure functions — no I/O, no DB, no HTTP
+- Models:      SQLAlchemy ORM in db/models.py
+- Schemas:     Pydantic request/response in schemas/ (separate from models)

@@ -1,0 +1,10 @@
+# CODEOWNERS
+# These files require a review from the repo owner on every PR.
+# Add your GitHub username below.
+
+python_engine/app/constants.py        @DKDVE
+python_engine/app/analytics/         @DKDVE
+python_engine/alembic/               @DKDVE
+.cursorrules                          @DKDVE
+render.yaml                           @DKDVE
+.github/workflows/                    @DKDVE

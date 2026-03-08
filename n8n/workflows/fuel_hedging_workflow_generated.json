@@ -1,0 +1,317 @@
+{
+  "name": "Fuel Hedging Advisor - Production v1",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -800,
+        0
+      ],
+      "id": "schedule-7b34fdfc",
+      "name": "Daily 06:00 UTC Schedule"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Mock Market Data - Replace with real APIs later\nreturn [{\n  json: {\n    date: new Date().toISOString().split('T')[0],\n    jet_fuel_spot_usd_bbl: 95.50,\n    heating_oil_futures_usd_bbl: 92.30,\n    brent_crude_futures_usd_bbl: 85.00,\n    wti_crude_futures_usd_bbl: 82.50,\n    crack_spread_usd_bbl: 3.20,\n    volatility_index_pct: 18.5,\n    volatility_regime: 'LOW',\n    r2_heating_oil: 0.87,\n    r2_brent: 0.75,\n    r2_wti: 0.72,\n    recommended_proxy: 'heating_oil',\n    ifrs9_eligible: true,\n    forecast_mape: 7.2\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        0
+      ],
+      "id": "mock-d8feda4c",
+      "name": "Mock Market Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst data = $input.first().json;\n\nconst formattedAnalysis = `\n# FUEL HEDGING MARKET DATA\nDate: ${data.date}\n\n## Spot & Futures Prices\n- Jet Fuel Spot (US Gulf Coast): $${data.jet_fuel_spot_usd_bbl.toFixed(2)}/bbl\n- Heating Oil Futures (NYMEX): $${data.heating_oil_futures_usd_bbl.toFixed(2)}/bbl\n- Brent Crude Futures (ICE): $${data.brent_crude_futures_usd_bbl.toFixed(2)}/bbl\n- WTI Crude Futures (NYMEX): $${data.wti_crude_futures_usd_bbl.toFixed(2)}/bbl\n\n## Key Metrics\n- Crack Spread: $${data.crack_spread_usd_bbl.toFixed(2)}/bbl\n- Volatility Index: ${data.volatility_index_pct.toFixed(1)}% (${data.volatility_regime})\n\n## Analytics\n- R\u00b2 Heating Oil: ${data.r2_heating_oil.toFixed(3)}\n- R\u00b2 Brent Crude: ${data.r2_brent.toFixed(3)}\n- R\u00b2 WTI Crude: ${data.r2_wti.toFixed(3)}\n- Recommended Proxy: ${data.recommended_proxy}\n- IFRS 9 Eligible: ${data.ifrs9_eligible ? 'YES' : 'NO'}\n- Forecast MAPE: ${data.forecast_mape.toFixed(1)}%\n`;\n\nreturn [{\n  json: {\n    ...data,\n    formatted_analysis: formattedAnalysis,\n    timestamp: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -100,
+        0
+      ],
+      "id": "format-1946eb9b",
+      "name": "Format Agent Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Agent 1 - Basis Risk - MOCK AGENT\n// TODO: Replace with AI Agent node + OpenAI Chat Model in UI\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    agent_id: \"basis_risk\",\n    risk_level: \"LOW\",\n    recommendation: \"HEDGE\",\n    conviction_level: 8,\n    metrics: {\n      r2_value: data.r2_heating_oil || 0.87,\n      score: 8\n    },\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: data.r2_heating_oil >= 0.80,\n    rationale: \"R\u00b2 of 0.87 exceeds IFRS 9 threshold. Heating oil is optimal proxy.\",\n    generated_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        -400
+      ],
+      "id": "agent1-8b7b08bc",
+      "name": "Agent 1 - Basis Risk"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Agent 2 - Liquidity - MOCK AGENT\n// TODO: Replace with AI Agent node + OpenAI Chat Model in UI\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    agent_id: \"liquidity\",\n    risk_level: \"LOW\",\n    recommendation: \"HEDGE\",\n    conviction_level: 8,\n    metrics: {\n      r2_value: data.r2_heating_oil || 0.87,\n      score: 8\n    },\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: data.r2_heating_oil >= 0.80,\n    rationale: \"Strong market depth. Collateral impact 12.5% (under 15% limit).\",\n    generated_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        -200
+      ],
+      "id": "agent2-d109af66",
+      "name": "Agent 2 - Liquidity"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Agent 3 - Operational - MOCK AGENT\n// TODO: Replace with AI Agent node + OpenAI Chat Model in UI\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    agent_id: \"operational\",\n    risk_level: \"LOW\",\n    recommendation: \"HEDGE\",\n    conviction_level: 8,\n    metrics: {\n      r2_value: data.r2_heating_oil || 0.87,\n      score: 8\n    },\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: data.r2_heating_oil >= 0.80,\n    rationale: \"Low complexity. Transaction costs 0.19%. Operationally feasible.\",\n    generated_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ],
+      "id": "agent3-38118ec4",
+      "name": "Agent 3 - Operational"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Agent 4 - IFRS9 - MOCK AGENT\n// TODO: Replace with AI Agent node + OpenAI Chat Model in UI\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    agent_id: \"ifrs9\",\n    risk_level: \"LOW\",\n    recommendation: \"HEDGE\",\n    conviction_level: 8,\n    metrics: {\n      r2_value: data.r2_heating_oil || 0.87,\n      score: 8\n    },\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: data.r2_heating_oil >= 0.80,\n    rationale: \"IFRS 9 ELIGIBLE. R\u00b2 meets 0.80 threshold. Hedge accounting approved.\",\n    generated_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        200
+      ],
+      "id": "agent4-8214339e",
+      "name": "Agent 4 - IFRS9"
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// Agent 5 - Macro - MOCK AGENT\n// TODO: Replace with AI Agent node + OpenAI Chat Model in UI\nconst data = $input.first().json;\n\nreturn [{\n  json: {\n    agent_id: \"macro\",\n    risk_level: \"LOW\",\n    recommendation: \"HEDGE\",\n    conviction_level: 8,\n    metrics: {\n      r2_value: data.r2_heating_oil || 0.87,\n      score: 8\n    },\n    constraints_satisfied: true,\n    action_required: false,\n    ifrs9_eligible: data.r2_heating_oil >= 0.80,\n    rationale: \"Neutral macro environment. Moderate geopolitical risk. Recommend hedging.\",\n    generated_at: new Date().toISOString()\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        400
+      ],
+      "id": "agent5-09f844fb",
+      "name": "Agent 5 - Macro"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll"
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        700,
+        0
+      ],
+      "id": "merge-c41d3b99",
+      "name": "Investment Committee Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst agents = $input.all();\n\nlet votesInFavor = 0;\nlet convictionSum = 0;\nlet criticalRisks = [];\nlet ifrs9Eligible = true;\nlet constraintsSatisfied = true;\n\nfor (const agent of agents) {\n  const agentData = agent.json;\n  if (agentData.recommendation === 'HEDGE') votesInFavor++;\n  convictionSum += agentData.conviction_level || 0;\n  if (agentData.risk_level === 'CRITICAL') criticalRisks.push(agentData.agent_id);\n  if (agentData.ifrs9_eligible === false) ifrs9Eligible = false;\n  if (agentData.constraints_satisfied === false) constraintsSatisfied = false;\n}\n\nconst avgConviction = convictionSum / agents.length;\n\nreturn [{\n  json: {\n    votes_in_favor: votesInFavor,\n    votes_total: agents.length,\n    conviction_avg: avgConviction,\n    critical_risks: criticalRisks,\n    ifrs9_eligible: ifrs9Eligible,\n    constraints_satisfied: constraintsSatisfied,\n    agent_outputs: agents.map(a => a.json)\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        0
+      ],
+      "id": "synthesis-70af5c0d",
+      "name": "Committee Synthesis"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst committee = $input.first().json;\n\nlet decision = \"REJECT\";\nlet rationale = \"\";\n\nif (!committee.constraints_satisfied) {\n  decision = \"REJECT\";\n  rationale = \"Hard constraints violated (HR > 80% or Collateral > 15%)\";\n} else if (!committee.ifrs9_eligible) {\n  decision = \"REJECT\";\n  rationale = \"IFRS 9 not eligible (R\u00b2 < 0.80)\";\n} else if (committee.critical_risks.length > 0) {\n  decision = \"REJECT\";\n  rationale = `Critical risks: ${committee.critical_risks.join(', ')}`;\n} else if (committee.votes_in_favor >= 4) {\n  decision = \"IMPLEMENT\";\n  rationale = \"Strong consensus (4-5/5 agents). All constraints satisfied.\";\n} else if (committee.votes_in_favor === 3) {\n  decision = \"MODIFY\";\n  rationale = \"Moderate consensus (3/5). Reduce position size by 30%.\";\n} else {\n  decision = \"MONITOR\";\n  rationale = \"Weak consensus. Wait for better conditions.\";\n}\n\nconst recommendation = {\n  recommendation_type: decision === \"IMPLEMENT\" ? \"HEDGE_NEW\" : \"WAIT\",\n  instrument: \"heating_oil\",\n  notional_usd: decision === \"MODIFY\" ? 3500000 : 5000000,\n  contracts: decision === \"MODIFY\" ? 350 : 500,\n  hedge_ratio_pct: decision === \"MODIFY\" ? 55.0 : 75.0,\n  ifrs9_eligible: committee.ifrs9_eligible,\n  agent_consensus: {\n    votes_in_favor: committee.votes_in_favor,\n    conviction_avg: committee.conviction_avg\n  },\n  cro_decision: decision,\n  cro_rationale: rationale,\n  action_required: decision === \"IMPLEMENT\",\n  requires_cfo_approval: true,\n  generated_at: new Date().toISOString()\n};\n\nreturn [{ json: recommendation }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "id": "cro-4effb0b3",
+      "name": "CRO Risk Gate"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst rec = $input.first().json;\n\nconsole.log('\ud83c\udfaf FINAL HEDGE RECOMMENDATION:');\nconsole.log(`Decision: ${rec.cro_decision}`);\nconsole.log(`Rationale: ${rec.cro_rationale}`);\nconsole.log(`Instrument: ${rec.instrument}`);\nconsole.log(`Notional: $${rec.notional_usd.toLocaleString()}`);\nconsole.log(`Contracts: ${rec.contracts}`);\nconsole.log(`Hedge Ratio: ${rec.hedge_ratio_pct}%`);\nconsole.log(`IFRS 9 Eligible: ${rec.ifrs9_eligible ? 'YES' : 'NO'}`);\nconsole.log(`Consensus: ${rec.agent_consensus.votes_in_favor}/5 votes`);\nconsole.log(`Generated: ${rec.generated_at}`);\n\nreturn [{ \n  json: {\n    ...rec,\n    workflow_status: \"COMPLETE\",\n    summary: `${rec.cro_decision}: ${rec.cro_rationale}`\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        0
+      ],
+      "id": "output-4dc84d2e",
+      "name": "Final Output"
+    }
+  ],
+  "connections": {
+    "Daily 06:00 UTC Schedule": {
+      "main": [
+        [
+          {
+            "node": "Mock Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Market Data": {
+      "main": [
+        [
+          {
+            "node": "Format Agent Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Agent Input": {
+      "main": [
+        [
+          {
+            "node": "Agent 1 - Basis Risk",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Agent 2 - Liquidity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Agent 3 - Operational",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Agent 4 - IFRS9",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Agent 5 - Macro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent 1 - Basis Risk": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Agent 2 - Liquidity": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Agent 3 - Operational": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Agent 4 - IFRS9": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Agent 5 - Macro": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Investment Committee Merge": {
+      "main": [
+        [
+          {
+            "node": "Committee Synthesis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Committee Synthesis": {
+      "main": [
+        [
+          {
+            "node": "CRO Risk Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRO Risk Gate": {
+      "main": [
+        [
+          {
+            "node": "Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}

@@ -1,0 +1,1155 @@
+{
+  "name": "Ai Hedge Fund viral copy",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "=https://api.polygon.io/v2/aggs/ticker/{{ $json.message.text }}/range/1/day/{{DateTime.now().minus({days: 30}).toFormat('yyyy-MM-dd')}}/{{DateTime.now().toFormat('yyyy-MM-dd')}}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "apikey"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        -224
+      ],
+      "id": "9cf63081-d52d-43a6-b3d7-b059909f2adc",
+      "name": "Daily Market data"
+    },
+    {
+      "parameters": {
+        "url": "https://api.polygon.io/v3/reference/tickers",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ticker",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "apikey",
+              "value": "="
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        -48
+      ],
+      "id": "e59b6d6a-1ba4-42fe-a573-4fa7831a1c72",
+      "name": "Company Fudmentals"
+    },
+    {
+      "parameters": {
+        "url": "https://api.polygon.io/vX/reference/financials",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ticker",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "apikey",
+              "value": "="
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        144
+      ],
+      "id": "7809b27a-07ef-48af-bac1-0c923c7b8f68",
+      "name": "Financial Statements"
+    },
+    {
+      "parameters": {
+        "url": "https://newsapi.org/v2/everything",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.message.text }} AND (earnings OR financial OR investment)"
+            },
+            {
+              "name": "apiKey",
+              "value": "="
+            },
+            {
+              "name": "from",
+              "value": "={{DateTime.now().minus({days: 7}).toFormat('yyyy-MM-dd')}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        320
+      ],
+      "id": "b06fd92f-c199-4a9a-8e0e-64aaf72182e2",
+      "name": "News & Sentiment"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        224,
+        -32
+      ],
+      "id": "3cf2f5c4-32ee-44cf-9ef8-71ec2e862aa0",
+      "name": "Data aggregator"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        384,
+        0
+      ],
+      "id": "ea3bfec0-d46f-4c11-9c42-90ab5341fc41",
+      "name": "Market intelligence hub"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        176
+      ],
+      "id": "30c68b6d-3309-4a43-92e7-50df107603f6",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "=define",
+        "text": "={{ $json.formatted_analysis }}\n\n# Warren Buffett Investment Agent\n\n## Your Task\nYou are Warren Buffett analyzing this investment opportunity. Focus on:\n- Business quality and competitive moats\n- Management effectiveness \n- Intrinsic value vs current price\n- Long-term growth prospects\n- Margin of safety\n\nExtract relevant financial data from the market information above and apply your value investing principles.\n\n## Output Format\n**BUFFETT RECOMMENDATION: [BUY/HOLD/SELL]**\n**CONVICTION LEVEL: [1-10]**\n**TARGET ALLOCATION: [0-25%]**\n**TIME HORIZON: [5-10+ years]**\n\n**INVESTMENT THESIS:**\n- Economic moat analysis\n- Management assessment  \n- Valuation summary\n- Risk factors\n\n**BUFFETT WISDOM:**\n\"[Include relevant quote]\"",
+        "options": {
+          "systemMessage": "You are Warren Buffett, the Oracle of Omaha. Focus on long-term value investing with emphasis on business quality, competitive moats, and intrinsic value calculations. Always think like you're buying a piece of a business, not just a stock ticker."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        16
+      ],
+      "id": "97b911ce-f3b6-4e89-825d-db7477776608",
+      "name": "Warren Buffet"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# Charlie Munger Investment Agent\n\n## Role & Philosophy\nYou are Charlie Munger, Warren's wise partner and master of mental models. You provide contrarian analysis focusing on:\n- Multidisciplinary thinking and mental models\n- Avoiding stupid mistakes rather than seeking brilliance\n- Quality businesses at reasonable prices\n- Behavioral psychology in markets and cognitive biases\n- Circle of competence assessment\n\n## Mental Models Toolkit\n- Psychology: Incentive-caused bias, social proof, confirmation bias\n- Economics: Scale economics, network effects, switching costs\n- Systems Thinking: Feedback loops, second-order effects\n\n## Analysis Framework\nAnalyze the provided market data using mental models and contrarian thinking.\n\n## Output Format\n**MUNGER ANALYSIS: [OPPORTUNITY/CAUTION/AVOID]**\n**RISK RATING: [1-10, where 10 is highest risk]**\n**MENTAL MODEL SCORE: [1-10]**\n**CIRCLE OF COMPETENCE: [IN/OUT/BORDERLINE]**\n\n**KEY MENTAL MODELS APPLIED:**\n- Primary frameworks relevant to this investment\n- Behavioral biases observed in market pricing\n- Incentive structures and agency considerations\n\n**CONTRARIAN INSIGHTS:**\n- Market sentiment vs reality gap\n- Overlooked competitive advantages\n- Temporary headwinds vs structural problems\n\n**MUNGER WISDOM:**\n\"[Relevant Munger quote or principle]\"",
+        "options": {
+          "systemMessage": "You are Charlie Munger, applying multidisciplinary mental models and contrarian analysis to investment decisions. Focus on avoiding mistakes, understanding incentives, and seeing what others miss through psychological and systems thinking. Be skeptical and look for what could go wrong."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        -256
+      ],
+      "id": "c4ba9a35-fa8a-483a-89e1-4f58a0d645a8",
+      "name": "Charlie Munger"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        976,
+        -112
+      ],
+      "id": "968f724e-cb8a-4616-9b70-ebb6428b08a2",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Market intelligence hub').item.json.data[0].ticker }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1088,
+        -112
+      ],
+      "id": "a2d63b54-b162-44fa-88d8-bed7e1a7694d",
+      "name": "Simple Memory1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.formatted_analysis }}\n\n# Bill Ackman Investment Agent\n\n## Role & Philosophy\nYou are Bill Ackman of Pershing Square Capital Management. You focus on:\n- Activist investing and corporate governance improvements\n- High-conviction, concentrated positions (10-20% allocations)\n- Catalyst-driven investment opportunities with defined timelines\n- Deep fundamental analysis and sum-of-the-parts valuations\n- Turning around underperforming companies through engagement\n\n## Analysis Framework\nAnalyze the market data above for activist opportunities and value creation potential.\n\n## Output Format\n**ACKMAN POSITION: [LONG/SHORT/ACTIVIST LONG]**\n**CONVICTION LEVEL: [1-10, typically 7-10 for positions]**\n**CATALYST TIMELINE: [6-36 months]**\n**TARGET POSITION SIZE: [5-20%]**\n**ENGAGEMENT PROBABILITY: [HIGH/MEDIUM/LOW]**\n\n**ACTIVIST INVESTMENT THESIS:**\n- Corporate governance issues and improvement opportunities\n- Management performance gaps and accountability\n- Strategic value creation initiatives\n- Hidden value and asset optimization potential\n\n**CATALYST ANALYSIS:**\n- Primary catalysts and expected timing\n- Board engagement and proxy contest potential\n- Strategic alternative probabilities\n- Management change scenarios\n\n**ENGAGEMENT STRATEGY:**\n- Initial dialogue and relationship building\n- Board representation approach\n- Public campaign potential\n- Coalition building opportunities\n\n**ACKMAN INSIGHT:**\n\"[Relevant insight about activist investing or value creation]\"",
+        "options": {
+          "systemMessage": "You are Bill Ackman, focusing on activist investing, high-conviction positions, and catalyst-driven value creation. Think like an engaged owner who can influence management and unlock hidden value through corporate governance improvements."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        336
+      ],
+      "id": "8fa09b73-5a93-43b9-a832-730fd0c1b7f6",
+      "name": "Bill Ackman"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        512
+      ],
+      "id": "9261e8a3-5b11-4e8b-a45d-ba83bc8043c9",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Market intelligence hub').item.json.data[0].ticker }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        512
+      ],
+      "id": "590ac5fa-376a-401d-aa9a-348fe2863f93",
+      "name": "Simple Memory2"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.formatted_analysis }}\n\nBased on the TSLA market data above, provide your Steve Cohen multi-strategy trading analysis with specific entry points, position sizing, and risk management.\n\nFollow your framework and provide:\n- Trading strategy (Long/Short/Hedge)\n- Conviction level (1-10)\n- Position size recommendation\n- Entry and exit points\n- Stop loss levels",
+        "options": {
+          "systemMessage": "You are Steve Cohen, focusing on multi-strategy investing with emphasis on information edge, rapid execution, and sophisticated risk management. Think like a trader who combines deep research with opportunistic timing and advanced risk management"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        -560
+      ],
+      "id": "db775171-0f6c-45ca-b586-14ded7abdeb5",
+      "name": "Steve Cohen"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.formatted_analysis }}\n\n# Ray Dalio Investment Agent\n\n## Role & Philosophy\nYou are Ray Dalio, founder of Bridgewater Associates. You focus on:\n- Macroeconomic analysis and understanding the \"economic machine\"\n- Diversification across asset classes and geographies\n- Risk parity and correlation-based portfolio construction\n- Systematic, principle-based investing\n- Debt cycles, monetary policy, and geopolitical analysis\n\n## Macroeconomic Framework\n- Economic Machine: Short-term and long-term debt cycles\n- Global Context: Currency strength, monetary policy, geopolitical tensions\n- Market Regime: Growth/recession, inflation/deflation environments\n- Risk Parity: Correlation analysis and diversification benefits\n\n## Analysis Framework\nAnalyze the market data above through a macroeconomic and systematic lens, considering how this investment fits into the current economic environment and portfolio construction principles.\n\n## Output Format\n**DALIO STRATEGY: [ALLOCATE/REDUCE/HEDGE/AVOID]**\n**MACRO ENVIRONMENT SCORE: [1-10]**\n**DIVERSIFICATION VALUE: [HIGH/MEDIUM/LOW]**\n**RISK CONTRIBUTION: [LOW/MEDIUM/HIGH]**\n**ECONOMIC SEASON: [GROWTH/RECESSION/REFLATION/STAGFLATION]**\n\n**MACROECONOMIC ANALYSIS:**\n- Current position in debt/economic cycles\n- Central bank policy environment and constraints\n- Global capital flow dynamics\n- Currency and sovereign risk assessment\n\n**PORTFOLIO CONSTRUCTION:**\n- Correlation with typical holdings\n- Risk parity contribution analysis\n- Geographic and sector diversification impact\n- Optimal allocation percentage\n\n**BRIDGEWATER PRINCIPLES:**\n\"[Relevant Dalio principle or economic insight]\"",
+        "options": {
+          "systemMessage": "You are Ray Dalio, focusing on macroeconomic analysis, systematic investing, and risk parity approaches. Think in terms of economic cycles, global capital flows, and building an 'All Weather' portfolio that performs across different economic environments."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        944,
+        688
+      ],
+      "id": "e34463ed-be1e-493a-a290-f11ee654e6aa",
+      "name": "Ray Dalio"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        960,
+        -400
+      ],
+      "id": "c4db3364-6700-402d-b6e9-63d4d59f24ea",
+      "name": "OpenAI Chat Model3",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Market intelligence hub').item.json.data[0].ticker }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        -400
+      ],
+      "id": "f9035e40-c116-4cb3-b296-e62dac9c42a3",
+      "name": "Simple Memory3"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        944,
+        880
+      ],
+      "id": "46e2d30a-44fc-42bc-9c05-ed05aec35a50",
+      "name": "OpenAI Chat Model4",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Market intelligence hub').item.json.data[0].ticker }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1040,
+        880
+      ],
+      "id": "fa6525f5-e2cf-4a58-b060-7e6e52f5ab9a",
+      "name": "Simple Memory4"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Market intelligence hub').item.json.data[0].ticker }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1088,
+        176
+      ],
+      "id": "c86788e1-4242-443e-a17d-cf917cbff45e",
+      "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple data extractor\nconst items = $input.all();\n\n// Start with basic symbol extraction\nlet symbol = \"TSLA\"; // Hardcode for now since we can see TSLA in your data\n\n// Create a simple formatted string with the actual data we can see\nlet analysisText = `INVESTMENT ANALYSIS FOR ${symbol}\\n\\n`;\n\n// Add the raw data directly\nanalysisText += `RAW API DATA:\\n`;\nfor (let i = 0; i < items.length; i++) {\n  analysisText += `\\nData Source ${i + 1}:\\n`;\n  analysisText += JSON.stringify(items[i].json, null, 2);\n  analysisText += `\\n${'='.repeat(50)}\\n`;\n}\n\nreturn [{ \n  json: { \n    symbol: symbol,\n    formatted_analysis: analysisText,\n    debug: `Found ${items.length} items`\n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        0
+      ],
+      "id": "0ff54ae0-2f25-407b-b0df-82cea1ad2635",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1312,
+        0
+      ],
+      "id": "3e20eed2-d6a8-4dfd-ba37-0f4de9085864",
+      "name": "Investment Committee"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=INVESTMENT COMMITTEE RECOMMENDATIONS:\n\n{{ $json.committee_summary }}\n\n# Chief Risk Officer & Portfolio Manager\n\nYou have received investment recommendations from 5 legendary investors. Please synthesize their analysis and make a final portfolio decision.\n\nReview each agent's recommendation above and provide:\n\n## Output Format\n**PORTFOLIO DECISION: [IMPLEMENT/MODIFY/MONITOR/REJECT]**\n**FINAL POSITION SIZE: X.X% of portfolio**\n**RISK RATING: [1-10 scale]**\n**EXPECTED ANNUAL RETURN: X.X%**\n**MAXIMUM EXPECTED LOSS: -X.X%**\n\n**COMMITTEE CONSENSUS ANALYSIS:**\n- Summary of each agent's recommendation\n- Average conviction level across all agents\n- Primary agreement factors\n- Key disagreement points and resolution\n\n**IMPLEMENTATION PLAN:**\n- Entry strategy and timing\n- Stop-loss level: X.X%\n- Profit targets: X.X% and X.X%\n- Risk management requirements\n\n**RISK OFFICER SUMMARY:**\n\"[Concise summary of final decision rationale]\"",
+        "options": {
+          "systemMessage": "You are the Chief Risk Officer and Portfolio Manager synthesizing input from 5 world-class investors into optimal portfolio decisions. Balance conviction with risk management, ensuring no single position can materially damage the portfolio while capturing asymmetric opportunities."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        48
+      ],
+      "id": "c767fb39-8f86-4b1a-868c-281bfd962c33",
+      "name": "Risk Management"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1744,
+        224
+      ],
+      "id": "b5674dcc-956d-44b1-970c-8fd1f711b994",
+      "name": "OpenAI Chat Model5",
+      "credentials": {
+        "openAiApi": {
+          "id": "mTU0qrB9NCnt4Ocr",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Code1').item.json.committee_summary }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        1856,
+        240
+      ],
+      "id": "dc0a7c7e-a927-414b-a32c-7c86614e3872",
+      "name": "Simple Memory5"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nlet summary = \"INVESTMENT COMMITTEE RECOMMENDATIONS:\\n\\n\";\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  summary += `AGENT ${i + 1} RECOMMENDATION:\\n`;\n  summary += JSON.stringify(item.json, null, 2);\n  summary += \"\\n\" + \"=\".repeat(50) + \"\\n\\n\";\n}\n\nreturn [{ \n  json: { \n    committee_summary: summary,\n    agent_count: items.length\n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        48
+      ],
+      "id": "30a61428-63de-4bf4-9cd3-f7a5aa29a4e9",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -528,
+        0
+      ],
+      "id": "19c126cd-2a0c-47ee-83e7-d41ff9394349",
+      "name": "Telegram Trigger",
+      "webhookId": "8e6563cf-bdc5-4f21-975f-6eea6d07ed74",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Create multiple separate outputs for Telegram\nconst input = $input.first();\nconst fullAnalysis = input.json.output || \"\";\nconst symbol = \"TSLA\";\n\n// Create summary\nconst summary = `AI HEDGE FUND ANALYSIS - ${symbol}\nDate: ${new Date().toLocaleDateString()}\n\nInvestment Committee: 5 Legendary Investors\nAnalysis Status: Complete\nFull report follows in parts...`;\n\n// Split analysis into parts\nconst chunkSize = 3500;\nconst chunks = [];\n\nfor (let i = 0; i < fullAnalysis.length; i += chunkSize) {\n  let chunk = fullAnalysis.substring(i, i + chunkSize);\n  \n  // Try to break at line break\n  if (i + chunkSize < fullAnalysis.length) {\n    const lastLineBreak = chunk.lastIndexOf('\\n');\n    if (lastLineBreak > chunkSize * 0.8) {\n      chunk = chunk.substring(0, lastLineBreak);\n      i = i + lastLineBreak - chunkSize;\n    }\n  }\n  chunks.push(chunk);\n}\n\nreturn [{ \n  json: { \n    summary: summary,\n    part1: chunks[0] || \"\",\n    part2: chunks[1] || \"\",\n    part3: chunks[2] || \"\",\n    total_parts: chunks.length,\n    symbol: symbol\n  } \n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        48
+      ],
+      "id": "2a51a729-1add-4c09-bd76-8d4454a3a157",
+      "name": "Code2"
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.summary }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2336,
+        -352
+      ],
+      "id": "c0418761-ae9d-40aa-8dab-0f207c34cf31",
+      "name": "Summary",
+      "webhookId": "4b348733-728f-4aac-8cc0-41b04db9ed56",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Code2').item.json.part1 }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2336,
+        -160
+      ],
+      "id": "c5b0cd45-5279-40cc-b283-7247b3d74339",
+      "name": "Part1",
+      "webhookId": "47a4d460-829e-4f61-aebe-b67d69cdb7c0",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Code2').item.json.part2 }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2336,
+        16
+      ],
+      "id": "0e6dea05-042b-4034-ba54-dd4e3ecff9bb",
+      "name": "Part 2",
+      "webhookId": "7effc466-1fc9-4e81-9797-5f09075c1174",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ $('Code2').item.json.part3 }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2336,
+        240
+      ],
+      "id": "0b2e4934-77ca-401d-841d-c425d446d704",
+      "name": "Part 3",
+      "webhookId": "e08803ed-664f-46b7-b014-dd2cf6ddbdf1",
+      "credentials": {
+        "telegramApi": {
+          "id": "BwQQkWdRYzwTPlKm",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        -256
+      ],
+      "id": "49fa158d-9aa5-47a8-afea-78e902507c5e",
+      "name": "Wait1",
+      "webhookId": "c6fbb1ea-b5ba-4700-a8d7-343e36b3b39f"
+    },
+    {
+      "parameters": {
+        "amount": 25
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        16
+      ],
+      "id": "eaa63cfd-729d-40b4-97a7-a456c13bbc76",
+      "name": "Wait2",
+      "webhookId": "c4131388-5215-425f-a8c9-24301d78daad"
+    },
+    {
+      "parameters": {
+        "amount": 35
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        256
+      ],
+      "id": "2d0af362-4eda-4ba1-b9cc-56e9dc58069b",
+      "name": "Wait3",
+      "webhookId": "c9d01407-fd00-46fe-92a0-f7478ebefa4e"
+    },
+    {
+      "parameters": {
+        "amount": 45
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        688
+      ],
+      "id": "87703313-48f6-4f07-abc9-fe167f11ae29",
+      "name": "Wait4",
+      "webhookId": "2076ed6c-4761-4bd1-8e7d-e41557dd8b68"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Market data": {
+      "main": [
+        [
+          {
+            "node": "Data aggregator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News & Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Data aggregator",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Company Fudmentals": {
+      "main": [
+        [
+          {
+            "node": "Data aggregator",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Financial Statements": {
+      "main": [
+        [
+          {
+            "node": "Data aggregator",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Data aggregator": {
+      "main": [
+        [
+          {
+            "node": "Market intelligence hub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Market intelligence hub": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Warren Buffet",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Charlie Munger",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Charlie Munger",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Bill Ackman",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory2": {
+      "ai_memory": [
+        [
+          {
+            "node": "Bill Ackman",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Steve Cohen": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Charlie Munger": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Warren Buffet": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Bill Ackman": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Ray Dalio": {
+      "main": [
+        [
+          {
+            "node": "Investment Committee",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Steve Cohen",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory3": {
+      "ai_memory": [
+        [
+          {
+            "node": "Steve Cohen",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Ray Dalio",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory4": {
+      "ai_memory": [
+        [
+          {
+            "node": "Ray Dalio",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Warren Buffet",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Wait4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Steve Cohen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Investment Committee": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Risk Management",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory5": {
+      "ai_memory": [
+        [
+          {
+            "node": "Risk Management",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Risk Management": {
+      "main": [
+        [
+          {
+            "node": "Code2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Risk Management",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Daily Market data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Company Fudmentals",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Financial Statements",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "News & Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code2": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Part1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Part 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Part 3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Summary": {
+      "main": [
+        []
+      ]
+    },
+    "Part1": {
+      "main": [
+        []
+      ]
+    },
+    "Part 2": {
+      "main": [
+        []
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Charlie Munger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait2": {
+      "main": [
+        [
+          {
+            "node": "Warren Buffet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait3": {
+      "main": [
+        [
+          {
+            "node": "Bill Ackman",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait4": {
+      "main": [
+        [
+          {
+            "node": "Ray Dalio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "922b78a2-f917-4786-a285-09a7946e1e1f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bda284ba69a5bf5f0d731ca0a44a60340df82eff9ee04a27b6a86d364a4b86e3"
+  },
+  "id": "K3tSLWkhmnso1YSH",
+  "tags": []
+}
