@@ -7,6 +7,7 @@ import { usePendingRecommendations } from '@/hooks/useRecommendations';
 import { useLatestForecast } from '@/hooks/useForecast';
 import { useLivePrices } from '@/hooks/useLivePrices';
 import { usePermissions } from '@/hooks/usePermissions';
+import { Link } from 'react-router-dom';
 import { formatMillions, formatRatio, formatPct } from '@/lib/formatters';
 import { TrendingDown, Shield, DollarSign, Target, Play, Database } from 'lucide-react';
 import { toast } from 'sonner';
@@ -215,12 +216,12 @@ export function DashboardPage() {
               <p className="text-slate-400 mb-4">
                 Review and approve hedge strategies to manage fuel price risk.
               </p>
-              <a
-                href="/recommendations"
+              <Link
+                to="/recommendations"
                 className="btn btn-secondary inline-block"
               >
                 Review Recommendations →
-              </a>
+              </Link>
             </div>
           </div>
         </div>
