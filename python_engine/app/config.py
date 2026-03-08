@@ -12,7 +12,13 @@ class Settings:
 
     # Database — no default with real credentials; use .env
     # Treat empty string as unset (GitHub Actions passes empty when secret missing)
+    # Render/Heroku provide postgres:// or postgresql:// — asyncpg requires postgresql+asyncpg://
     _db_url = os.getenv("DATABASE_URL", "").strip()
+    if _db_url and "postgresql+asyncpg" not in _db_url:
+        for prefix in ("postgresql://", "postgres://"):
+            if _db_url.startswith(prefix):
+                _db_url = "postgresql+asyncpg://" + _db_url[len(prefix) :]
+                break
     DATABASE_URL: str = (
         _db_url
         if _db_url
