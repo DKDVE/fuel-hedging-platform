@@ -8,6 +8,7 @@ on:
       - "models/**"
       - "data/**"
       - "render.yaml"
+      - "Dockerfile"
       - ".github/workflows/deploy-backend.yml"
 
   workflow_dispatch:
