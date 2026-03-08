@@ -14,7 +14,7 @@ import {
 import { formatUSD, formatMillions, formatPct } from '@/lib/formatters';
 import type { BacktestLatestResponse } from '@/hooks/useAnalytics';
 import { useSeedBacktest } from '@/hooks/useAnalytics';
-import { useAuth } from '@/contexts/AuthContext';
+import { usePermissions } from '@/hooks/usePermissions';
 
 interface BacktestTabProps {
   data: BacktestLatestResponse | undefined;
@@ -30,15 +30,15 @@ function formatDateShort(dateStr: string) {
 }
 
 function BacktestEmptyState() {
-  const { user } = useAuth();
+  const { hasPermission } = usePermissions();
   const seedBacktest = useSeedBacktest();
-  const isAdmin = user?.role === 'ADMIN';
+  const canGenerate = hasPermission('trigger:pipeline');
 
   return (
     <div className="card">
       <div className="flex flex-col items-center justify-center py-16 text-slate-500">
         <p className="text-lg font-medium mb-2">No backtest data yet</p>
-        {isAdmin ? (
+        {canGenerate ? (
           <>
             <p className="text-sm text-center max-w-md mb-4">
               Generate backtest results (takes ~30 seconds)
@@ -57,7 +57,7 @@ function BacktestEmptyState() {
           </>
         ) : (
           <p className="text-sm text-center max-w-md">
-            Ask an admin to generate backtest data (Analytics → Backtesting → Generate)
+            Ask an admin or risk manager to generate backtest data (Analytics → Backtesting → Generate)
           </p>
         )}
       </div>

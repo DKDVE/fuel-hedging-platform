@@ -33,9 +33,9 @@ class AgentOutput(BaseModel):
         max_length=500,
         description="Agent's recommendation text",
     )
-    metrics: dict[str, float] = Field(
+    metrics: dict[str, float | str | bool] = Field(
         ...,
-        description="Agent-specific metrics (e.g., R², hedge ratio, volatility index)",
+        description="Agent-specific metrics (numbers, or categorical strings e.g. vol_regime='MODERATE', hedge_timing_signal='HEDGE_NOW')",
     )
     constraints_satisfied: bool
     action_required: bool
