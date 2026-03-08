@@ -23,7 +23,7 @@ dist/
 build/
 htmlcov/
 .coverage
-
+docs/
 # Node / frontend
 node_modules/
 frontend/dist/
