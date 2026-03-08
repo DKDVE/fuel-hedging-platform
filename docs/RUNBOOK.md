@@ -29,6 +29,7 @@ In **Environment** → **Add Environment Variable**:
 | Key | Value |
 |-----|-------|
 | `PORT` | `5678` |
+| `N8N_PROXY_HOPS` | `1` (required for Render — fixes X-Forwarded-For / trust proxy error) |
 | `N8N_API_KEY` | Same value as `N8N_WEBHOOK_SECRET` in hedge-api |
 | `N8N_ENCRYPTION_KEY` | Generate: `openssl rand -hex 16` |
 | `N8N_SECURE_COOKIE` | `false` |

@@ -70,6 +70,8 @@ services:
     envVars:
       - key: PORT
         value: "5678"            # n8n default; Render routes to this port
+      - key: N8N_PROXY_HOPS
+        value: "1"               # Trust Render's proxy (fixes X-Forwarded-For / express-rate-limit)
       - key: N8N_API_KEY
         sync: false              # same value as N8N_WEBHOOK_SECRET in FastAPI
       - key: FASTAPI_INTERNAL_URL
