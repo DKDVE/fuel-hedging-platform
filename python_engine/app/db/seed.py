@@ -144,7 +144,7 @@ async def seed_database() -> None:
             },
             {
                 "email": "cfo@hedgeplatform.com",
-                "password": "cfo123",
+                "password": "cfo12345",
                 "role": UserRole.CFO,
             },
         ]
@@ -167,6 +167,9 @@ async def seed_database() -> None:
                 )
                 session.add(user)
                 created_count += 1
+            else:
+                # Update password for existing users (e.g. CFO had cfo123 which fails 8-char min)
+                existing_user.hashed_password = hash_password(user_data["password"])
         
         if created_count > 0:
             print(f"✓ Created {created_count} test users")
@@ -180,7 +183,7 @@ async def seed_database() -> None:
         print("  Admin:        admin@airline.com / admin123")
         print("  Analyst:      analyst@hedgeplatform.com / analyst123")
         print("  Risk Manager: riskmanager@hedgeplatform.com / riskmanager123")
-        print("  CFO:          cfo@hedgeplatform.com / cfo123")
+        print("  CFO:          cfo@hedgeplatform.com / cfo12345")
         print("\n⚠️  Change these passwords in production!")
 
 
