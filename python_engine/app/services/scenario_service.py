@@ -73,6 +73,9 @@ class ScenarioService:
             scenario, opt_result, stressed_var, current_price, stressed_price
         )
 
+        # Convert numpy types to native Python for JSON serialization
+        instrument_mix = {k: float(v) for k, v in opt_result.instrument_mix.items()}
+
         return {
             "scenario_id": scenario.id,
             "scenario_name": scenario.name,
@@ -80,14 +83,14 @@ class ScenarioService:
             "stressed_price": round(stressed_price, 2),
             "price_change_pct": round(scenario.price_shock_pct * 100, 1),
             "optimizer_result": {
-                "optimal_hr": opt_result.optimal_hr,
-                "instrument_mix": opt_result.instrument_mix,
-                "collateral_usd": opt_result.collateral_usd,
-                "collateral_pct_of_reserves": opt_result.collateral_pct_of_reserves,
-                "solver_converged": opt_result.solver_converged,
+                "optimal_hr": float(opt_result.optimal_hr),
+                "instrument_mix": instrument_mix,
+                "collateral_usd": float(opt_result.collateral_usd),
+                "collateral_pct_of_reserves": float(opt_result.collateral_pct_of_reserves),
+                "solver_converged": bool(opt_result.solver_converged),
             },
             "var_impact": {
-                "stressed_var_usd": stressed_var.var_usd if stressed_var else None,
+                "stressed_var_usd": float(stressed_var.var_usd) if stressed_var else None,
                 "normal_var_usd": None,
             },
             "risk_narrative": narrative,

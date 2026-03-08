@@ -115,7 +115,7 @@ class HedgeOptimizer:
                 },
             )
 
-            solver_converged = result.success
+            solver_converged = bool(result.success)  # scipy returns numpy.bool_
             optimal_x = result.x if solver_converged else x0
 
         except Exception:
