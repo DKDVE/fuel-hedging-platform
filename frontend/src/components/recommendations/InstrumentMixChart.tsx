@@ -6,22 +6,19 @@ interface InstrumentMixChartProps {
   instrumentMix: Record<string, number>;
 }
 
-const renderActiveShape = (props: any) => {
-  const RADIAN = Math.PI / 180;
-  const {
-    cx, cy, midAngle, innerRadius, outerRadius, startAngle, endAngle,
-    fill, payload, percent, value
-  } = props;
-  const sin = Math.sin(-RADIAN * midAngle);
-  const cos = Math.cos(-RADIAN * midAngle);
-  const sx = cx + (outerRadius + 10) * cos;
-  const sy = cy + (outerRadius + 10) * sin;
-  const mx = cx + (outerRadius + 30) * cos;
-  const my = cy + (outerRadius + 30) * sin;
-  const ex = mx + (cos >= 0 ? 1 : -1) * 22;
-  const ey = my;
-  const textAnchor = cos >= 0 ? 'start' : 'end';
-
+/** Active shape: center label + highlighted sector only. No external labels to avoid clipping the upper half. */
+const renderActiveShape = (props: unknown) => {
+  const p = props as {
+    cx: number;
+    cy: number;
+    innerRadius: number;
+    outerRadius: number;
+    startAngle: number;
+    endAngle: number;
+    fill: string;
+    payload: { name: string };
+  };
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload } = p;
   return (
     <g>
       <text x={cx} y={cy} dy={8} textAnchor="middle" fill="#fff" fontSize={14} fontWeight="bold">
@@ -36,36 +33,6 @@ const renderActiveShape = (props: any) => {
         endAngle={endAngle}
         fill={fill}
       />
-      <Sector
-        cx={cx}
-        cy={cy}
-        startAngle={startAngle}
-        endAngle={endAngle}
-        innerRadius={outerRadius + 6}
-        outerRadius={outerRadius + 10}
-        fill={fill}
-      />
-      <path d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`} stroke={fill} fill="none" />
-      <circle cx={ex} cy={ey} r={2} fill={fill} stroke="none" />
-      <text
-        x={ex + (cos >= 0 ? 1 : -1) * 12}
-        y={ey}
-        textAnchor={textAnchor}
-        fill="#94a3b8"
-        fontSize={12}
-      >
-        {`${Number(value).toFixed(1)}%`}
-      </text>
-      <text
-        x={ex + (cos >= 0 ? 1 : -1) * 12}
-        y={ey}
-        dy={16}
-        textAnchor={textAnchor}
-        fill="#64748b"
-        fontSize={10}
-      >
-        {`(${((percent ?? 0) * 100).toFixed(1)}%)`}
-      </text>
     </g>
   );
 };
@@ -282,18 +249,18 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
         </div>
       </div>
 
-      {/* Chart - pie centered in its own area, legend below */}
-      <div className="pt-4">
-        <ResponsiveContainer width="100%" height={340}>
-        <PieChart margin={{ top: 40, right: 40, bottom: 20, left: 40 }}>
+      {/* Chart - pie centered with room for full donut visibility */}
+      <div className="pt-4 overflow-visible">
+        <ResponsiveContainer width="100%" height={320}>
+        <PieChart margin={{ top: 24, right: 24, bottom: 24, left: 24 }}>
           <Pie
             activeIndex={activeIndex}
             activeShape={renderActiveShape}
             data={data}
             cx="50%"
-            cy="42%"
-            innerRadius={70}
-            outerRadius={95}
+            cy="50%"
+            innerRadius={65}
+            outerRadius={100}
             paddingAngle={2}
             dataKey="value"
             onMouseEnter={onPieEnter}

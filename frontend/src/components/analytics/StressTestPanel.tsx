@@ -25,8 +25,9 @@ export function StressTestPanel() {
 
   // Auto-select first scenario when scenarios load
   useEffect(() => {
-    if (scenarios.length > 0 && !selectedScenario) {
-      setSelectedScenario(scenarios[0].id);
+    const first = scenarios[0];
+    if (first && !selectedScenario) {
+      setSelectedScenario(first.id);
     }
   }, [scenarios, selectedScenario, setSelectedScenario]);
 
@@ -109,8 +110,11 @@ export function StressTestPanel() {
         </button>
       </div>
 
-      {/* Results panel */}
-      {result && <ScenarioResults result={result} />}
+      {/* Results panel - only show when result matches selected scenario */}
+      {result &&
+        result.scenario_id === selectedScenario && (
+          <ScenarioResults result={result} />
+        )}
     </div>
   );
 }
