@@ -34,7 +34,7 @@ In **Environment** → **Add Environment Variable**:
 | `N8N_ENCRYPTION_KEY` | Generate: `openssl rand -hex 16` |
 | `N8N_SECURE_COOKIE` | `false` |
 | `OPENAI_API_KEY` | Your OpenAI key (optional) |
-| `FASTAPI_INTERNAL_URL` | hedge-api public URL, e.g. `https://hedge-api-o9t3.onrender.com` (n8n must reach API over internet) |
+| `FASTAPI_INTERNAL_URL` | hedge-api public URL from dashboard, e.g. `https://hedge-api-09t3.onrender.com` (no trailing slash; n8n must reach API over internet) |
 | `WEBHOOK_URL` | Leave blank for now; set after first deploy (see step 6) |
 
 ### 4. Configure hedge-api to trigger n8n
@@ -187,9 +187,9 @@ After hedge-n8n is running:
 
 ## Service URLs (After Deploy)
 
-| Service | URL |
-|---------|-----|
-| hedge-api | `https://hedge-api-<your-id>.onrender.com` |
-| hedge-n8n | `https://hedge-n8n-<your-id>.onrender.com` |
-| hedge-postgres | Internal connection string (from dashboard) |
-| hedge-redis | Internal connection string (from dashboard) |
+| Service | URL | Notes |
+|---------|-----|-------|
+| hedge-api | `https://hedge-api-<id>.onrender.com` | Get exact URL from Render dashboard; use for `FASTAPI_INTERNAL_URL` in hedge-n8n |
+| hedge-n8n | `https://hedge-n8n-<id>.onrender.com` | Use for `N8N_TRIGGER_URL` in hedge-api: `https://hedge-n8n-<id>.onrender.com/webhook/fuel-hedge-trigger` |
+| hedge-postgres | Internal connection string (from dashboard) | — |
+| hedge-redis | Internal connection string (from dashboard) | — |
