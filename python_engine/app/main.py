@@ -71,8 +71,8 @@ app = FastAPI(
     title="Fuel Hedging Platform API",
     description="Aviation fuel hedging optimization platform with AI-driven risk analysis",
     version="1.0.0",
-    docs_url="/api/v1/docs" if settings.ENVIRONMENT == "development" else None,
-    redoc_url="/api/v1/redoc" if settings.ENVIRONMENT == "development" else None,
+    docs_url="/api/v1/docs",
+    redoc_url="/api/v1/redoc",
     lifespan=lifespan,
 )
 
