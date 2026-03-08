@@ -661,8 +661,8 @@ async def _run_pipeline_background(notional_usd: Decimal) -> None:
 
 @router.get("/n8n-diagnostics", include_in_schema=False)
 async def n8n_diagnostics(
-    probe: bool = Query(False, description="Attempt to reach n8n webhook"),
     current_user: AdminUser,
+    probe: bool = Query(False, description="Attempt to reach n8n webhook"),
     settings=Depends(get_settings),
 ) -> dict:
     """
