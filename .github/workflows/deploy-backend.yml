@@ -105,8 +105,8 @@ jobs:
         run: |
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "${{ secrets.RENDER_DEPLOY_HOOK_API }}")
-          if [ "$RESPONSE" != "201" ]; then
-            echo "Deploy hook returned HTTP $RESPONSE (expected 201)"
+          if [ "$RESPONSE" != "200" ] && [ "$RESPONSE" != "201" ]; then
+            echo "Deploy hook returned HTTP $RESPONSE (expected 200 or 201)"
             exit 1
           fi
           echo "Deploy triggered successfully (HTTP $RESPONSE)"
@@ -153,7 +153,7 @@ jobs:
           fi
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "${{ secrets.RENDER_DEPLOY_HOOK_N8N }}")
-          if [ "$RESPONSE" != "201" ]; then
+          if [ "$RESPONSE" != "200" ] && [ "$RESPONSE" != "201" ]; then
             echo "n8n deploy hook returned HTTP $RESPONSE (optional — not failing)"
             exit 0
           fi
