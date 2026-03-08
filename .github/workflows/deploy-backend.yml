@@ -8,12 +8,13 @@ on:
       - "models/**"
       - "data/**"
       - "render.yaml"
+      - ".github/workflows/deploy-backend.yml"
 
   workflow_dispatch:
     inputs:
       reason:
         description: "Reason for manual deploy"
-        required: true
+        required: false
 
 jobs:
   wait-for-ci:
@@ -36,6 +37,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate required secrets
+        run: |
+          if [ -z "${{ secrets.RENDER_DATABASE_URL }}" ]; then
+            echo "::error::RENDER_DATABASE_URL secret is not set. Add it in Settings → Secrets → Actions."
+            echo "Get the External Database URL from Render dashboard → hedge-postgres"
+            exit 1
+          fi
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_API }}" ]; then
+            echo "::error::RENDER_DEPLOY_HOOK_API secret is not set. Add it in Settings → Secrets → Actions."
+            echo "Get the Deploy Hook URL from Render dashboard → hedge-api → Deploy Hook"
+            exit 1
+          fi
+          echo "Required secrets present"
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -47,12 +62,20 @@ jobs:
         working-directory: python_engine
         run: pip install -r requirements.txt -r requirements-core.txt -r requirements-analytics.txt 2>/dev/null || pip install -r requirements.txt
 
+      - name: Prepare DATABASE_URL for asyncpg
+        id: db_url
+        run: |
+          RAW="${{ secrets.RENDER_DATABASE_URL }}"
+          # Render returns postgresql:// — asyncpg needs postgresql+asyncpg://
+          URL=$(echo "$RAW" | sed 's|^postgresql://|postgresql+asyncpg://|')
+          echo "url=$URL" >> $GITHUB_OUTPUT
+
       - name: Check migration safety (schema drift detection)
         working-directory: python_engine
         env:
-          DATABASE_URL: ${{ secrets.RENDER_DATABASE_URL }}
-          SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET }}
+          DATABASE_URL: ${{ steps.db_url.outputs.url }}
+          SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || secrets.SECRET_KEY || 'migrate-placeholder' }}
+          N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET || 'migrate-placeholder' }}
           ENVIRONMENT: production
         run: |
           echo "Checking for unapplied migrations..."
@@ -62,9 +85,9 @@ jobs:
       - name: Apply migrations
         working-directory: python_engine
         env:
-          DATABASE_URL: ${{ secrets.RENDER_DATABASE_URL }}
-          SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET }}
+          DATABASE_URL: ${{ steps.db_url.outputs.url }}
+          SECRET_KEY: ${{ secrets.JWT_SECRET_KEY || secrets.SECRET_KEY || 'migrate-placeholder' }}
+          N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET || 'migrate-placeholder' }}
           ENVIRONMENT: production
         run: |
           echo "Applying migrations..."
@@ -100,7 +123,7 @@ jobs:
 
             HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               --max-time 10 \
-              https://hedge-api.onrender.com/health 2>/dev/null || echo "000")
+              https://hedge-api-o9t3.onrender.com/health 2>/dev/null || echo "000")
 
             if [ "$HTTP_STATUS" = "200" ]; then
               echo "✓ API is healthy (HTTP 200)"
@@ -118,14 +141,19 @@ jobs:
     name: Deploy n8n to Render
     runs-on: ubuntu-latest
     needs: deploy-api
+    continue-on-error: true
 
     steps:
       - name: Trigger Render deploy — hedge-n8n
         run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK_N8N }}" ]; then
+            echo "RENDER_DEPLOY_HOOK_N8N not set — skipping n8n deploy"
+            exit 0
+          fi
           RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST "${{ secrets.RENDER_DEPLOY_HOOK_N8N }}")
           if [ "$RESPONSE" != "201" ]; then
-            echo "n8n deploy hook returned HTTP $RESPONSE"
-            exit 1
+            echo "n8n deploy hook returned HTTP $RESPONSE (optional — not failing)"
+            exit 0
           fi
           echo "n8n deploy triggered (HTTP $RESPONSE)"

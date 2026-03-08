@@ -19,7 +19,7 @@ jobs:
           # Analytics summary requires auth — use health as fallback
           RESPONSE=$(curl -s \
             -H "Accept: application/json" \
-            https://hedge-api.onrender.com/health \
+            https://hedge-api-o9t3.onrender.com/health \
             -w "\n%{http_code}")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)

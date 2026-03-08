@@ -42,8 +42,8 @@ jobs:
 
       - name: Build for production
         env:
-          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
-          VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
+          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL || 'https://hedge-api-o9t3.onrender.com' }}
+          VITE_WS_URL: ${{ secrets.VITE_WS_URL || '' }}
           VITE_BASE_PATH: ${{ secrets.VITE_BASE_PATH || '/fuel-hedging-platform/' }}
           NODE_ENV: production
         run: npm run build

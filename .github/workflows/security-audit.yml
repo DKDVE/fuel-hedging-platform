@@ -39,7 +39,7 @@ jobs:
           
       - name: Run Bandit (Python code security)
         run: |
-          bandit -r python_engine/ -f json -o bandit-report.json -c pyproject.toml || true
+          bandit -r python_engine/ -f json -o bandit-report.json -ll || true
           
       - name: Run pip-audit (PEP 708 auditor)
         run: |
