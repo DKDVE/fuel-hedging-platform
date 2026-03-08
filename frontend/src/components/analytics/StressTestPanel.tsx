@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { useStressScenarios, type ScenarioRunResult } from '@/hooks/useStressScenarios';
 import { formatMillions, formatPct, formatPrice } from '@/lib/formatters';
+import { toast } from 'sonner';
 
 function getPrimaryInstrument(instrumentMix: Record<string, number>): string {
   if (!instrumentMix || Object.keys(instrumentMix).length === 0) return '—';
@@ -18,14 +20,29 @@ export function StressTestPanel() {
     runScenario,
     result,
     isRunning,
+    error,
   } = useStressScenarios();
+
+  // Auto-select first scenario when scenarios load
+  useEffect(() => {
+    if (scenarios.length > 0 && !selectedScenario) {
+      setSelectedScenario(scenarios[0].id);
+    }
+  }, [scenarios, selectedScenario, setSelectedScenario]);
 
   const handleRunScenario = async () => {
     if (!selectedScenario) return;
     try {
       await runScenario(selectedScenario);
-    } catch {
-      // Error handled by mutation
+      toast.success('Stress test completed');
+    } catch (e: unknown) {
+      const msg =
+        e && typeof e === 'object' && 'response' in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? 'Stress test failed'
+          : e instanceof Error
+            ? e.message
+            : 'Stress test failed';
+      toast.error(String(msg));
     }
   };
 
@@ -67,6 +84,15 @@ export function StressTestPanel() {
           <p className="text-sm text-gray-400 mb-4 italic">{selectedScenarioData.description}</p>
         )}
 
+        {error && (
+          <p className="text-red-400 text-sm mb-3">
+            {error instanceof Error
+              ? error.message
+              : typeof error === 'object' && error !== null && 'response' in error
+                ? (error as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? 'Stress test failed'
+                : 'Stress test failed. Check console.'}
+          </p>
+        )}
         <button
           onClick={handleRunScenario}
           disabled={!selectedScenario || isRunning}
