@@ -19,6 +19,9 @@ depends_on = None
 def upgrade() -> None:
     """Create all tables in correct FK dependency order."""
     
+    # Enable TimescaleDB extension (required for Render Postgres; no-op if already exists)
+    op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE")
+    
     # Users table (no FK dependencies)
     op.create_table(
         'users',
