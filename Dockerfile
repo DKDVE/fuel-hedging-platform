@@ -28,7 +28,7 @@ COPY python_engine/alembic/ ./alembic/
 COPY python_engine/alembic.ini .
 COPY python_engine/manage.py .
 COPY python_engine/scripts/ ./scripts/
-COPY data/ /data/
+COPY data/ ./data/
 RUN mkdir -p /models
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,5 +49,5 @@ ENV PORT=10000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
-# Seed database on first run (creates admin user, system user, platform config)
-CMD ["sh", "-c", "python manage.py seed_db || true && exec gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:${PORT} --timeout 120 --access-logfile - --error-logfile -"]
+# Seed DB, load historical CSV (for analytics pipeline), then start gunicorn
+CMD ["sh", "-c", "python manage.py seed_db || true && python manage.py load_csv || true && exec gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --workers 2 --bind 0.0.0.0:${PORT} --timeout 120 --access-logfile - --error-logfile -"]

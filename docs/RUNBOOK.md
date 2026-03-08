@@ -1,96 +1,189 @@
-# Operations Runbook — Fuel Hedging Platform
+# Fuel Hedging Platform — Render Deployment
 
-## Adding a New User
+---
 
-1. SSH into Render (or use the Render shell): `render shell hedge-api`
-2. Run: `python scripts/create_user.py --email user@example.com --role analyst`
-3. User receives a reset-password email (if SMTP configured) or gets a temp password printed to console
+## Add n8n to existing Render setup
 
-## Rolling Back a Model Artifact
+Use this when **hedge-api, hedge-postgres, hedge-redis** already run on Render and you only need to add n8n.
 
-If LSTM retraining produces a degraded model:
-1. Go to GitHub → commits → find last good `chore(models): weekly retrain` commit
-2. Copy the commit SHA
-3. Run locally: `git checkout <SHA> -- models/`
-4. Commit: `git commit -m "fix: revert model artifacts to <SHA> due to MAPE regression"`
-5. Push — triggers deploy-backend.yml which redeploys
+### 1. Create hedge-n8n web service
 
-## Updating Constraint Limits
+1. [Render Dashboard](https://dashboard.render.com) → **New** → **Web Service**
+2. **Connect repository:** Choose **Existing Image**
+3. **Image URL:** `docker.io/n8nio/n8n:latest`
+4. **Name:** `hedge-n8n`
+5. **Region:** Same as hedge-api (required for internal networking)
+6. **Instance Type:** Starter (or Free for testing; Free spins down after 15 min)
 
-Constraint limits (HR_HARD_CAP, COLLATERAL_LIMIT, etc.) are in:
-- `python_engine/app/constants.py` — code defaults
-- The `config` table in PostgreSQL — runtime overrides (admin can change via Settings page)
+### 2. Add disk
 
-To update without redeployment:
-1. Log in as admin at the platform URL
-2. Navigate to Settings → Risk Constraints
-3. Update values — changes take effect immediately (no restart needed)
+1. **Disks** → **Add Disk**
+2. **Name:** `n8n-data`
+3. **Mount Path:** `/home/node/.n8n`
+4. **Size:** 1 GB
 
-To update the code defaults (requires redeployment):
-1. Edit `python_engine/app/constants.py`
-2. PR → merge to main → auto-deploys via deploy-backend.yml
+### 3. Environment variables
 
-## Handling a Nightly Validation Breach
+In **Environment** → **Add Environment Variable**:
 
-When nightly-validation.yml fails:
-1. Check the Actions run log for which threshold breached
-2. Log in to the platform as risk_manager or admin
-3. Navigate to Compliance page — the breached limit shows in red
-4. Check Alerts — the alert system will have created an alert
-5. If MAPE > 12%: trigger manual model retrain (workflow_dispatch on lstm-retrain.yml)
-6. If VaR > limit: escalate to CFO — a recommendation review may be needed
-7. If collateral > 15%: immediately review open positions via Positions page
+| Key | Value |
+|-----|-------|
+| `PORT` | `5678` |
+| `N8N_API_KEY` | Same value as `N8N_WEBHOOK_SECRET` in hedge-api |
+| `N8N_ENCRYPTION_KEY` | Generate: `openssl rand -hex 16` |
+| `N8N_SECURE_COOKIE` | `false` |
+| `OPENAI_API_KEY` | Your OpenAI key (optional) |
+| `FASTAPI_INTERNAL_URL` | From **hedge-api** → **Info** → **Internal URL** (e.g. `http://hedge-api:10000`) |
+| `WEBHOOK_URL` | Leave blank for now; set after first deploy (see step 6) |
 
-## Manually Triggering the Daily Pipeline
+### 4. Link hedge-api to hedge-n8n
 
-Via the UI (recommended):
-1. Log in as admin
-2. Dashboard → "Run Pipeline" button
+1. Open **hedge-api** → **Environment**
+2. Add variable: **Key** `N8N_INTERNAL_URL`, **Value** → **From Service** → **hedge-n8n** → **Internal URL** (or **hostport**)
+3. Save (hedge-api will redeploy)
 
-Via GitHub Actions:
-1. Go to Actions → deploy-backend.yml → "Run workflow"
+### 5. Deploy hook and GitHub secret
 
-Via curl (direct n8n trigger):
-```bash
-curl -X POST https://YOUR-N8N-URL/webhook/fuel-hedge-trigger \
-  -H "Content-Type: application/json" \
-  -d '{"trigger_type": "manual", "run_id": "manual-'$(date +%s)'"}'
-```
+1. **hedge-n8n** → **Settings** → **Deploy Hook** → copy URL
+2. GitHub repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+3. **Name:** `RENDER_DEPLOY_HOOK_N8N`, **Value:** the deploy hook URL
 
-## If Render Health Check Fails
+The **Deploy Backend** workflow already includes a `deploy-n8n` job. Once this secret is set, every push to `main` will deploy both hedge-api and hedge-n8n.
 
-Symptoms: deploy-backend.yml shows "API did not become healthy" error.
+### 6. After first deploy
 
-Diagnosis:
-1. Check Render dashboard → hedge-api → Logs tab
-2. Look for: startup errors, missing env vars, DB connection failures
+1. Get hedge-n8n URL from the dashboard (e.g. `https://hedge-n8n-xxxx.onrender.com`)
+2. **hedge-n8n** → **Environment** → add `WEBHOOK_URL` = that URL
+3. Redeploy hedge-n8n
+4. Open the n8n URL → **Workflows** → **Import** → `n8n/workflows/fuel_hedge_advisor_v2.json`
+5. Add OpenAI credential, then **Activate** the workflow
 
-Common causes and fixes:
-- **Missing env var**: Render dashboard → hedge-api → Environment → add the missing var → manual deploy
-- **Migration failed**: Check migration logs. May need to run `alembic downgrade -1` then `alembic upgrade head`
-- **Out of memory**: Starter plan has 512MB RAM. Check if LSTM model loading is causing OOM. Consider lazy loading.
-- **DB connection refused**: Render Postgres may have restarted. Usually self-heals in < 2 min. Re-trigger deploy.
+---
 
-Emergency rollback:
-1. Render dashboard → hedge-api → Deploys tab → find last successful deploy → "Rollback to this deploy"
+## Full Blueprint deployment (fresh setup)
 
-## Required Render Secrets
+Step-by-step guide to deploy the full stack via Render Blueprint.
 
-Set these in Render dashboard for each service:
+---
 
-**hedge-api:**
-- SECRET_KEY (same as JWT_SECRET_KEY in GitHub)
-- N8N_WEBHOOK_SECRET
-- OPENAI_API_KEY (optional)
-- EIA_API_KEY (optional)
+## Prerequisites
 
-**hedge-n8n:**
-- N8N_API_KEY (same value as N8N_WEBHOOK_SECRET)
-- N8N_ENCRYPTION_KEY (run: `openssl rand -hex 32`)
-- WEBHOOK_URL (your Render n8n service public URL)
-- OPENAI_API_KEY (optional)
+- [Render](https://render.com) account
+- GitHub repo connected to Render
+- OpenAI API key (for n8n AI agents; optional — platform works without it)
 
-## GitHub Pages Base Path
+---
 
-For project sites, the frontend is served at `https://USERNAME.github.io/fuel-hedging-platform/`.
-Set `VITE_BASE_PATH=/fuel-hedging-platform/` in GitHub Actions secrets when building for Pages.
+## Step 1: Create Blueprint
+
+1. Go to [Render Dashboard](https://dashboard.render.com)
+2. Click **New** → **Blueprint**
+3. Connect your GitHub account if not already connected
+4. Select the **fuel-hedging-platform** repository
+5. Render will detect `render.yaml` and show the services to create:
+   - **hedge-api** (web)
+   - **hedge-n8n** (worker)
+   - **hedge-postgres** (database)
+   - **hedge-redis** (redis)
+6. Choose a name for the Blueprint (e.g. `fuel-hedging-platform`)
+7. Select the same **region** for all services (required for internal networking)
+8. Click **Apply**
+
+---
+
+## Step 2: Set Secrets (Required Before First Deploy)
+
+All services with `sync: false` require manual secret values. Set these in the Render dashboard **before** the first deploy.
+
+### hedge-api
+
+| Secret | Where to get it | Notes |
+|--------|-----------------|-------|
+| `SECRET_KEY` | Generate: `openssl rand -hex 32` | JWT signing; min 32 chars |
+| `N8N_WEBHOOK_SECRET` | Generate: `openssl rand -hex 24` | Must match `N8N_API_KEY` in hedge-n8n |
+| `OPENAI_API_KEY` | [OpenAI](https://platform.openai.com/api-keys) | Optional; for n8n AI agents |
+| `EIA_API_KEY` | [EIA](https://www.eia.gov/opendata/register.php) | Optional; for live fuel prices |
+
+**How to set:** hedge-api → **Environment** → find keys with "secret" icon → paste values
+
+### hedge-n8n
+
+| Secret | Value | Notes |
+|--------|-------|-------|
+| `N8N_API_KEY` | Same as `N8N_WEBHOOK_SECRET` | Must match FastAPI |
+| `OPENAI_API_KEY` | Same as hedge-api | For AI agents in workflow |
+| `N8N_ENCRYPTION_KEY` | Generate: `openssl rand -hex 16` | Encrypts n8n credentials |
+| `WEBHOOK_URL` | `https://hedge-n8n-<your-id>.onrender.com` | **Set after first deploy** — use your hedge-n8n public URL from Render dashboard |
+
+**Note:** hedge-n8n is a **web service** so it can receive HTTP triggers from the API and expose the n8n UI for workflow import.
+
+---
+
+## Step 3: Get Deploy Hooks
+
+After the Blueprint creates the services:
+
+1. **hedge-api** → **Settings** → **Deploy Hook** → copy URL
+2. **hedge-n8n** → **Settings** → **Deploy Hook** → copy URL (if available)
+
+---
+
+## Step 4: Add GitHub Secrets
+
+In your repo: **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+
+| Secret | Value |
+|--------|-------|
+| `RENDER_DATABASE_URL` | hedge-postgres → **Connect** → **External Database URL** |
+| `RENDER_DEPLOY_HOOK_API` | hedge-api Deploy Hook URL |
+| `RENDER_DEPLOY_HOOK_N8N` | hedge-n8n Deploy Hook URL (optional) |
+
+**Important:** Convert the database URL for asyncpg before using in migrations. The deploy workflow does this automatically. Use the URL exactly as shown in Render (it may be `postgres://` or `postgresql://`).
+
+---
+
+## Step 5: Import n8n Workflow
+
+After hedge-n8n is running:
+
+1. Get the n8n URL from **hedge-n8n** → top of the page (e.g. `https://hedge-n8n-xxxx.onrender.com`)
+2. Set `WEBHOOK_URL` in hedge-n8n Environment to that URL (if not already set)
+3. **Workflow import:**
+   - Open the n8n URL in your browser
+   - **Workflows** → **Import from file** → select `n8n/workflows/fuel_hedge_advisor_v2.json` (from the repo)
+   - Add **OpenAI** credential: **Credentials** → **New** → **OpenAI API** → paste your key
+   - **Activate** the workflow (toggle in top-right)
+
+---
+
+## Step 6: Trigger First Deploy
+
+1. Push to `main` (or run the **Deploy Backend** workflow manually)
+2. The workflow will:
+   - Run migrations
+   - Deploy hedge-api via deploy hook
+   - Deploy hedge-n8n via deploy hook (if `RENDER_DEPLOY_HOOK_N8N` is set)
+3. Wait for health check: `https://hedge-api-o9t3.onrender.com/health` (or your API URL)
+
+---
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| hedge-api 500 on login | Ensure `DATABASE_URL` is set (from hedge-postgres link) |
+| Cookies not sent (401 after login) | `SameSite=None` is set for production; verify `FRONTEND_ORIGIN` |
+| n8n not found | Ensure `RENDER_DEPLOY_HOOK_N8N` is set and hedge-n8n exists |
+| Migrations fail | Use External Database URL; allow `0.0.0.0/0` in Postgres Networking for GitHub Actions |
+| CSV not found | Data is at `/app/data/`; ensure `data/fuel_hedging_dataset.csv` is in repo |
+
+---
+
+## Service URLs (After Deploy)
+
+| Service | URL |
+|---------|-----|
+| hedge-api | `https://hedge-api-<your-id>.onrender.com` |
+| hedge-n8n | `https://hedge-n8n-<your-id>.onrender.com` |
+| hedge-postgres | Internal connection string (from dashboard) |
+| hedge-redis | Internal connection string (from dashboard) |

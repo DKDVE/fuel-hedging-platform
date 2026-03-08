@@ -45,7 +45,7 @@ services:
         value: INFO
       - key: N8N_INTERNAL_URL
         fromService:
-          type: worker
+          type: web
           name: hedge-n8n
           property: hostport
       - key: N8N_TRIGGER_PATH
@@ -53,8 +53,8 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://DKDVE.github.io
 
-  # ── n8n Background Worker ────────────────────────────────────────────────────
-  - type: worker
+  # ── n8n Web Service (must be web to receive API webhook triggers) ──────────────
+  - type: web
     name: hedge-n8n
     runtime: image
     image:
@@ -68,6 +68,8 @@ services:
       sizeGB: 1
 
     envVars:
+      - key: PORT
+        value: "5678"            # n8n default; Render routes to this port
       - key: N8N_API_KEY
         sync: false              # same value as N8N_WEBHOOK_SECRET in FastAPI
       - key: FASTAPI_INTERNAL_URL
