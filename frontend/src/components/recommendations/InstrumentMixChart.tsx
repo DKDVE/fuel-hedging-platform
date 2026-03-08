@@ -218,7 +218,7 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
   }
 
   return (
-    <div className="card overflow-visible">
+    <div className="card overflow-visible relative z-10">
       {/* Header - separated from chart to prevent overlap */}
       <div className="flex items-start justify-between mb-8 pb-4 border-b border-slate-800">
         <div className="flex-1 min-w-0">
@@ -249,37 +249,37 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
         </div>
       </div>
 
-      {/* Chart - pie centered with room for full donut visibility */}
-      <div className="pt-4 overflow-visible">
+      {/* Chart - pie centered, rendered last so donut stays on top */}
+      <div className="pt-4 overflow-visible relative">
         <ResponsiveContainer width="100%" height={320}>
-        <PieChart margin={{ top: 24, right: 24, bottom: 24, left: 24 }}>
-          <Pie
-            activeIndex={activeIndex}
-            activeShape={renderActiveShape}
-            data={data}
-            cx="50%"
-            cy="50%"
-            innerRadius={65}
-            outerRadius={100}
-            paddingAngle={2}
-            dataKey="value"
-            onMouseEnter={onPieEnter}
-            animationBegin={0}
-            animationDuration={800}
-          >
-            {data.map((entry, index) => (
-              <Cell
-                key={`cell-${index}`}
-                fill={COLORS[entry.name] || '#64748b'}
-                stroke={index === activeIndex ? '#fff' : 'none'}
-                strokeWidth={index === activeIndex ? 2 : 0}
-              />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip />} />
-          <Legend content={<CustomLegend />} />
-        </PieChart>
-      </ResponsiveContainer>
+          <PieChart margin={{ top: 24, right: 24, bottom: 24, left: 24 }}>
+            <Tooltip content={<CustomTooltip />} />
+            <Legend content={<CustomLegend />} />
+            <Pie
+              activeIndex={activeIndex}
+              activeShape={renderActiveShape}
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={65}
+              outerRadius={100}
+              paddingAngle={2}
+              dataKey="value"
+              onMouseEnter={onPieEnter}
+              animationBegin={0}
+              animationDuration={800}
+            >
+              {data.map((entry, index) => (
+                <Cell
+                  key={`cell-${index}`}
+                  fill={COLORS[entry.name] || '#64748b'}
+                  stroke={index === activeIndex ? '#fff' : 'none'}
+                  strokeWidth={index === activeIndex ? 2 : 0}
+                />
+              ))}
+            </Pie>
+          </PieChart>
+        </ResponsiveContainer>
       </div>
 
       {/* Summary Statistics */}

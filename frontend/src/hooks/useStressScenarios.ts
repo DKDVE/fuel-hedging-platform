@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/lib/api';
 
@@ -60,11 +60,6 @@ export function useStressScenarios() {
   const runScenario = (scenarioId: string) => runMutation.mutateAsync(scenarioId);
 
   const selectedScenarioData = scenarios.find((s) => s.id === selectedScenario);
-
-  // Clear stale result when user switches to a different scenario
-  useEffect(() => {
-    runMutation.reset();
-  }, [selectedScenario, runMutation]);
 
   return {
     scenarios,

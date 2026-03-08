@@ -111,10 +111,16 @@ export function StressTestPanel() {
       </div>
 
       {/* Results panel - only show when result matches selected scenario */}
-      {result &&
-        result.scenario_id === selectedScenario && (
-          <ScenarioResults result={result} />
-        )}
+      {result && result.scenario_id === selectedScenario ? (
+        <ScenarioResults result={result} />
+      ) : (
+        selectedScenario &&
+        selectedScenarioData && (
+          <p className="mt-6 text-sm text-slate-500 italic">
+            Click &quot;Simulate Scenario&quot; to see results for {selectedScenarioData.name}.
+          </p>
+        )
+      )}
     </div>
   );
 }
