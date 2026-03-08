@@ -53,9 +53,9 @@ class Settings:
     USE_EIA_API: bool = os.getenv("USE_EIA_API", "true").lower() == "true"
     USE_SIMULATION_FALLBACK: bool = os.getenv("USE_SIMULATION_FALLBACK", "true").lower() == "true"
     
-    # Yahoo Finance Configuration
-    YAHOO_FINANCE_UPDATE_INTERVAL: int = int(os.getenv("YAHOO_FINANCE_UPDATE_INTERVAL", "60"))
-    YAHOO_FINANCE_CACHE_TTL: int = int(os.getenv("YAHOO_FINANCE_CACHE_TTL", "60"))
+    # Yahoo Finance Configuration (stay under ~100 req/hr to avoid rate limit/ban)
+    YAHOO_FINANCE_UPDATE_INTERVAL: int = int(os.getenv("YAHOO_FINANCE_UPDATE_INTERVAL", "300"))
+    YAHOO_FINANCE_CACHE_TTL: int = int(os.getenv("YAHOO_FINANCE_CACHE_TTL", "300"))
     MAX_YAHOO_REQUESTS_PER_HOUR: int = int(os.getenv("MAX_YAHOO_REQUESTS_PER_HOUR", "100"))
     
     # EIA API Configuration

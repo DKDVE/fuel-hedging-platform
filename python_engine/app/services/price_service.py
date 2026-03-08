@@ -177,7 +177,10 @@ class PriceService:
             from app.services.data_source_manager import get_data_source_manager
             from app.services.yahoo_finance_client import get_yahoo_finance_client
 
-            yahoo_client = get_yahoo_finance_client()
+            yahoo_client = get_yahoo_finance_client(
+                max_requests_per_hour=settings.MAX_YAHOO_REQUESTS_PER_HOUR,
+                cache_ttl_seconds=settings.YAHOO_FINANCE_CACHE_TTL,
+            )
             eia_client = EIAClient(settings.EIA_API_KEY) if settings.EIA_API_KEY else None
             self._data_source_manager = get_data_source_manager(
                 yahoo_client=yahoo_client,

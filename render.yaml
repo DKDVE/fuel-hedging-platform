@@ -55,6 +55,11 @@ services:
         value: /webhook/fuel-hedge-trigger
       - key: FRONTEND_ORIGIN
         value: https://DKDVE.github.io
+      # Yahoo Finance: 5 min interval to stay under ~100 req/hr (avoid rate limit/ban)
+      - key: YAHOO_FINANCE_UPDATE_INTERVAL
+        value: "300"
+      - key: YAHOO_FINANCE_CACHE_TTL
+        value: "300"
 
   # ── n8n Web Service (must be web to receive API webhook triggers) ──────────────
   - type: web
@@ -75,6 +80,8 @@ services:
         value: "5678"            # n8n default; Render routes to this port
       - key: N8N_PROXY_HOPS
         value: "1"               # Trust Render's proxy (fixes X-Forwarded-For / express-rate-limit)
+      - key: N8N_BLOCK_ENV_ACCESS_IN_NODE
+        value: "false"           # Allow workflows to use $env.FASTAPI_INTERNAL_URL, $env.N8N_API_KEY
       - key: N8N_API_KEY
         sync: false              # same value as N8N_WEBHOOK_SECRET in FastAPI
       - key: FASTAPI_INTERNAL_URL

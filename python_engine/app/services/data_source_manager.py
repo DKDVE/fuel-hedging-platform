@@ -198,21 +198,62 @@ class DataSourceManager:
         instruments: List[str]
     ) -> Dict[str, Optional[PriceWithMetadata]]:
         """
-        Get prices for multiple instruments concurrently.
-        
-        Args:
-            instruments: List of instrument names
-            
-        Returns:
-            Dictionary mapping instrument to price
+        Get prices for multiple instruments. Uses batch Yahoo fetch when
+        multiple Yahoo instruments are needed to reduce rate limit usage.
         """
+        yahoo_instruments = [
+            i for i in instruments
+            if DataSourceType.YAHOO_FINANCE in self._get_source_priority(i)
+        ]
+        if self.yahoo_client and len(yahoo_instruments) >= 2:
+            return await self._get_multiple_prices_batch(instruments, yahoo_instruments)
         tasks = [self.get_price(instrument) for instrument in instruments]
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
         return {
             instrument: result if not isinstance(result, Exception) else None
             for instrument, result in zip(instruments, results)
         }
+
+    async def _get_multiple_prices_batch(
+        self,
+        instruments: List[str],
+        yahoo_instruments: List[str],
+    ) -> Dict[str, Optional[PriceWithMetadata]]:
+        """Batch fetch Yahoo prices (1 API call), then fill jet_fuel from heating_oil."""
+        yahoo_only = [i for i in yahoo_instruments if i in self.yahoo_client.TICKER_MAP]
+        batch = await self.yahoo_client.get_multiple_prices(yahoo_only)
+        result: Dict[str, Optional[PriceWithMetadata]] = {}
+        for instrument in instruments:
+            if instrument == "jet_fuel":
+                ho = batch.get("heating_oil")
+                if ho:
+                    result[instrument] = PriceWithMetadata(
+                        instrument=instrument,
+                        price=ho.price + self.JET_FUEL_CRACK_SPREAD_BBL,
+                        timestamp=ho.timestamp,
+                        source=DataSourceType.YAHOO_FINANCE,
+                        priority=SourcePriority.PRIMARY,
+                        confidence=0.90,
+                        change_percent=ho.change_percent,
+                        volume=ho.volume,
+                    )
+                else:
+                    result[instrument] = await self.get_price(instrument)
+            elif instrument in batch and batch[instrument] is not None:
+                mp = batch[instrument]
+                result[instrument] = PriceWithMetadata(
+                    instrument=instrument,
+                    price=mp.price,
+                    timestamp=mp.timestamp,
+                    source=DataSourceType.YAHOO_FINANCE,
+                    priority=SourcePriority.PRIMARY,
+                    confidence=0.95,
+                    change_percent=mp.change_percent,
+                    volume=mp.volume,
+                )
+            else:
+                result[instrument] = await self.get_price(instrument)
+        return result
     
     def _get_source_priority(self, instrument: str) -> List[DataSourceType]:
         """

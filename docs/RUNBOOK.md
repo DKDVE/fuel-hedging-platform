@@ -36,6 +36,7 @@ In **Environment** → **Add Environment Variable**:
 | `OPENAI_API_KEY` | Your OpenAI key (optional) |
 | `FASTAPI_INTERNAL_URL` | hedge-api public URL from dashboard, e.g. `https://hedge-api-09t3.onrender.com` (no trailing slash; n8n must reach API over internet) |
 | `WEBHOOK_URL` | Leave blank for now; set after first deploy (see step 6) |
+| `N8N_BLOCK_ENV_ACCESS_IN_NODE` | `false` — required so workflows can use `$env.FASTAPI_INTERNAL_URL` and `$env.N8N_API_KEY` |
 
 ### 4. Configure hedge-api to trigger n8n
 
@@ -178,10 +179,13 @@ After hedge-n8n is running:
 | Cookies not sent (401 after login) | `SameSite=None` is set for production; verify `FRONTEND_ORIGIN` |
 | n8n not found | Ensure `RENDER_DEPLOY_HOOK_N8N` is set and hedge-n8n exists |
 | `n8n_trigger_failed` "Name or service not known" | Set **`N8N_TRIGGER_URL`** (full URL) in hedge-api: `https://hedge-n8n-xxxx.onrender.com/webhook/fuel-hedge-trigger`. Get the exact URL from hedge-n8n dashboard (top of page). No typo: use `onrender.com` not `onzender.com`. |
+| n8n "access to env vars denied" | Set **`N8N_BLOCK_ENV_ACCESS_IN_NODE=false`** in hedge-n8n Environment so workflows can use `$env.FASTAPI_INTERNAL_URL` and `$env.N8N_API_KEY`. |
 | Migrations fail | Use External Database URL; allow `0.0.0.0/0` in Postgres Networking for GitHub Actions |
 | CSV not found | Data is at `/app/data/`; ensure `data/fuel_hedging_dataset.csv` is in repo |
 
 **n8n connectivity check:** As admin, call `GET /api/v1/analytics/n8n-diagnostics?probe=true` to verify the configured URL and test the connection.
+
+| Yahoo Finance rate limit | Set `YAHOO_FINANCE_UPDATE_INTERVAL=300` (5 min) and `YAHOO_FINANCE_CACHE_TTL=300` in hedge-api to stay under ~100 req/hr and avoid ban. |
 
 ---
 

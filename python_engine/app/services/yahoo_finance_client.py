@@ -295,26 +295,105 @@ class YahooFinanceClient:
         use_cache: bool = True
     ) -> Dict[str, Optional[MarketPrice]]:
         """
-        Get prices for multiple instruments concurrently.
-        
-        Args:
-            instruments: List of instrument names
-            use_cache: Whether to use cached data
-            
-        Returns:
-            Dictionary mapping instrument name to price
+        Get prices for multiple instruments. Uses a single batch request when
+        cache misses to stay within rate limits (1 request vs N).
         """
-        tasks = [
-            self.get_price(instrument, use_cache)
-            for instrument in instruments
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        return {
-            instrument: result if not isinstance(result, Exception) else None
-            for instrument, result in zip(instruments, results)
-        }
+        result: Dict[str, Optional[MarketPrice]] = {}
+        cache_misses: list[str] = []
+
+        for instrument in instruments:
+            if use_cache and self.enable_caching:
+                cached = await self._get_from_cache(instrument)
+                if cached:
+                    result[instrument] = cached
+                    continue
+            if instrument in self.TICKER_MAP:
+                cache_misses.append(instrument)
+
+        if not cache_misses:
+            return result
+
+        # Single batch fetch for all cache misses (1 rate limit token)
+        if not await self.rate_limiter.acquire():
+            logger.warning("yahoo_finance_rate_limited", instruments=cache_misses)
+            for instrument in cache_misses:
+                result[instrument] = await self._get_from_cache(instrument, ignore_ttl=True)
+            return result
+
+        try:
+            tickers = [self.TICKER_MAP[i] for i in cache_misses]
+            batch_prices = await self.circuit_breaker.call(
+                self._fetch_batch_tickers,
+                tickers,
+            )
+            for instrument in cache_misses:
+                ticker = self.TICKER_MAP[instrument]
+                if ticker in batch_prices and batch_prices[ticker]:
+                    price_data = batch_prices[ticker]
+                    if self.enable_caching:
+                        await self._add_to_cache(instrument, price_data)
+                    result[instrument] = price_data
+                else:
+                    result[instrument] = await self._get_from_cache(instrument, ignore_ttl=True)
+        except Exception as e:
+            logger.warning("yahoo_finance_batch_failed", error=str(e), instruments=cache_misses)
+            for instrument in cache_misses:
+                result[instrument] = await self._get_from_cache(instrument, ignore_ttl=True)
+
+        return result
     
+    async def _fetch_batch_tickers(self, tickers: list[str]) -> Dict[str, Optional[MarketPrice]]:
+        """
+        Fetch multiple tickers in a single yfinance request (1 API call).
+        Returns dict mapping ticker symbol to MarketPrice.
+        """
+        if not tickers:
+            return {}
+        try:
+            import yfinance as yf
+
+            ticker_str = " ".join(tickers)
+            loop = asyncio.get_event_loop()
+
+            def _download():
+                return yf.download(
+                    ticker_str,
+                    period="1d",
+                    progress=False,
+                    group_by="ticker",
+                    auto_adjust=True,
+                    threads=False,
+                )
+
+            df = await loop.run_in_executor(None, _download)
+            result: Dict[str, Optional[MarketPrice]] = {}
+
+            for ticker in tickers:
+                try:
+                    if len(tickers) == 1:
+                        close_col = df["Close"] if "Close" in df.columns else df.iloc[:, 3]
+                    else:
+                        lvl0 = df.columns.get_level_values(0) if hasattr(df.columns, "get_level_values") else []
+                        close_col = df[ticker]["Close"] if ticker in lvl0 else None
+                    if close_col is None or (hasattr(close_col, "empty") and close_col.empty):
+                        result[ticker] = None
+                        continue
+                    series = close_col.dropna() if hasattr(close_col, "dropna") else close_col
+                    last_price = float(series.iloc[-1])
+                    result[ticker] = MarketPrice(
+                        symbol=ticker,
+                        price=last_price,
+                        timestamp=datetime.utcnow(),
+                        source="yahoo_finance",
+                    )
+                except (KeyError, IndexError, TypeError, AttributeError) as e:
+                    logger.debug("yahoo_batch_ticker_missing", ticker=ticker, error=str(e))
+                    result[ticker] = None
+            return result
+        except Exception as e:
+            logger.error("yahoo_finance_batch_error", tickers=tickers, error=str(e))
+            raise
+
     async def _fetch_ticker_data(self, ticker: str) -> Optional[MarketPrice]:
         """
         Fetch data for a single ticker from Yahoo Finance.
