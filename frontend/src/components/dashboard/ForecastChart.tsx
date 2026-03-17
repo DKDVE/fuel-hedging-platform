@@ -31,6 +31,8 @@ interface ForecastChartProps {
   isLoading?: boolean;
   /** When true, forecast is from analytics pipeline (real data). When false/undefined, shows as simulated. */
   fromAnalytics?: boolean;
+  /** MAPE from API (ensemble of ARIMA + LSTM + XGBoost). Used when data has no actual values to compute accuracy. */
+  mapeFromApi?: number | null;
 }
 
 export function ForecastChart({
@@ -38,6 +40,7 @@ export function ForecastChart({
   title = '30-Day Forecast',
   isLoading = false,
   fromAnalytics = false,
+  mapeFromApi = null,
 }: ForecastChartProps) {
   const dataSource: DataSourceType = fromAnalytics ? 'analytics' : 'simulation';
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d'>('30d');
@@ -61,15 +64,15 @@ export function ForecastChart({
       : forecastData.map(d => d.forecast!);
 
     if (priceValues.length < 2) {
-      return { trend: 0, accuracy: actualData.length > 0 ? 0 : null, volatility: 0 };
+      return { trend: 0, accuracy: null, volatility: 0 };
     }
 
     const firstPrice = priceValues[0] ?? 0;
     const lastPrice = priceValues[priceValues.length - 1] ?? 0;
     const trend = firstPrice > 0 ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
 
-    // Accuracy: MAPE when we have actual vs forecast; null when forecast-only
-    let accuracy: number | null = 0;
+    // Accuracy: MAPE when we have actual vs forecast; null when forecast-only (matches Dashboard KPI metric)
+    let accuracy: number | null = null;
     if (actualData.length > 0 && forecastData.length > 0) {
       const errors = actualData
         .filter(d => {
@@ -80,9 +83,7 @@ export function ForecastChart({
           const corresponding = forecastData.find(f => f.date === d.date);
           return Math.abs((d.actual! - corresponding!.forecast!) / d.actual!) * 100;
         });
-      accuracy = errors.length > 0 ? 100 - (errors.reduce((sum, e) => sum + e, 0) / errors.length) : 0;
-    } else {
-      accuracy = null; // No actual to compare
+      accuracy = errors.length > 0 ? errors.reduce((sum, e) => sum + e, 0) / errors.length : null;
     }
 
     // Volatility: std dev of prices (actual or forecast)
@@ -259,11 +260,21 @@ export function ForecastChart({
               </div>
               <div
                 className="bg-slate-800/50 border border-slate-700/80 rounded-xl px-4 py-3 text-center lg:text-right"
-                title={stats.accuracy === null ? 'Accuracy requires actual vs forecast comparison (historical data)' : undefined}
+                title={
+                  stats.accuracy !== null
+                    ? 'Accuracy from actual vs forecast overlap'
+                    : mapeFromApi != null && fromAnalytics
+                      ? 'MAPE of ensemble forecast (ARIMA + LSTM + XGBoost) vs validation set'
+                      : 'Accuracy requires completed analytics run'
+                }
               >
                 <div className="mb-0.5">
                   <span className="text-sm font-bold text-primary-400 tabular-nums">
-                    {stats.accuracy !== null ? `${stats.accuracy.toFixed(1)}%` : '—'}
+                    {stats.accuracy !== null
+                      ? `${stats.accuracy.toFixed(1)}%`
+                      : mapeFromApi != null && fromAnalytics
+                        ? `${mapeFromApi.toFixed(1)}%`
+                        : '—'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 font-medium">Accuracy</p>

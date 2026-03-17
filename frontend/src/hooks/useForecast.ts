@@ -10,21 +10,26 @@ export interface ForecastDataPoint {
 }
 
 export interface LatestForecastResponse {
-  forecast_date: string;
-  model_version: string;
-  mape: number;
+  forecast_date?: string;
+  model_version?: string;
+  mape?: number;
   data_points: ForecastDataPoint[];
 }
 
 export function useLatestForecast() {
-  return useQuery<ForecastDataPoint[]>({
+  return useQuery<LatestForecastResponse | null>({
     queryKey: ['forecast', 'latest'],
     queryFn: async () => {
       try {
         const response = await apiClient.get<LatestForecastResponse>('/analytics/forecast/latest');
-        return response.data?.data_points ?? [];
+        const data = response.data;
+        if (!data?.data_points?.length) return null;
+        return {
+          data_points: data.data_points,
+          mape: typeof data.mape === 'number' ? data.mape : undefined,
+        };
       } catch {
-        return [];
+        return null;
       }
     },
     staleTime: 5 * 60 * 1000,

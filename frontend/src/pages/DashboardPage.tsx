@@ -17,7 +17,9 @@ const VAR_LIMIT_USD = 5_000_000;
 export function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useAnalyticsSummary();
   const { data: pendingRecs, isLoading: _recoLoading } = usePendingRecommendations();
-  const { data: forecastData, isLoading: forecastLoading } = useLatestForecast();
+  const { data: forecastResponse, isLoading: forecastLoading } = useLatestForecast();
+  const forecastData = forecastResponse?.data_points ?? [];
+  const forecastMape = forecastResponse?.mape ?? null;
   const { prices, isConnected } = useLivePrices();
   const { hasPermission } = usePermissions();
   const triggerPipeline = useTriggerAnalytics();
@@ -176,20 +178,22 @@ export function DashboardPage() {
           glowColor="from-amber-600"
         />
 
-        <KPICard
-          title="Forecast Accuracy"
-          value={formatPct(mapeValue, 2)}
-          trend={mapeNum < 8 ? 'down' : 'up'}
-          trendValue={mapeNum < 8 ? 'On target' : 'Above target'}
-          threshold={{
-            value: 8.0,
-            current: mapeNum,
-            display: `${formatPct(mapeValue, 2)} / ${formatPct(8)}`,
-            type: mapeNum > 10 ? 'danger' : mapeNum > 8 ? 'warning' : 'success',
-          }}
-          icon={<Target className="h-5 w-5" />}
-          glowColor="from-green-600"
-        />
+        <div title="MAPE of ensemble forecast (ARIMA + LSTM + XGBoost) vs validation set. Lower is better.">
+          <KPICard
+            title="Forecast Accuracy (MAPE)"
+            value={formatPct(mapeValue, 2)}
+            trend={mapeNum < 8 ? 'down' : 'up'}
+            trendValue={mapeNum < 8 ? 'On target' : 'Above target'}
+            threshold={{
+              value: 8.0,
+              current: mapeNum,
+              display: `${formatPct(mapeValue, 2)} / ${formatPct(8)}`,
+              type: mapeNum > 10 ? 'danger' : mapeNum > 8 ? 'warning' : 'success',
+            }}
+            icon={<Target className="h-5 w-5" />}
+            glowColor="from-green-600"
+          />
+        </div>
       </div>
 
       {/* Forecast Chart */}
@@ -197,6 +201,7 @@ export function DashboardPage() {
           data={forecastData || []}
           isLoading={forecastLoading}
           fromAnalytics={(forecastData?.length ?? 0) > 0}
+          mapeFromApi={forecastMape}
         />
 
       {/* Agent Status Grid */}
