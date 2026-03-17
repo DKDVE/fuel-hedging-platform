@@ -27,7 +27,10 @@ jobs:
           cache-dependency-path: python_engine/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-core.txt -r requirements-analytics.txt 2>/dev/null || pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-analytics.txt
+          pip install "tensorflow-cpu>=2.13.0,<2.16.0"
         env:
           EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
 
