@@ -260,13 +260,7 @@ export function ForecastChart({
               </div>
               <div
                 className="bg-slate-800/50 border border-slate-700/80 rounded-xl px-4 py-3 text-center lg:text-right"
-                title={
-                  stats.accuracy !== null
-                    ? 'Accuracy from actual vs forecast overlap'
-                    : mapeFromApi != null && fromAnalytics
-                      ? 'MAPE of ensemble forecast (ARIMA + LSTM + XGBoost) vs validation set'
-                      : 'Accuracy requires completed analytics run'
-                }
+                title="Accuracy is MAPE (Mean Absolute Percentage Error). &lt;8% on target."
               >
                 <div className="mb-0.5">
                   <span className="text-sm font-bold text-primary-400 tabular-nums">
@@ -277,7 +271,7 @@ export function ForecastChart({
                         : '—'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 font-medium">Accuracy</p>
+                <p className="text-xs text-slate-500 font-medium">Accuracy (MAPE, {'<'}8% target)</p>
               </div>
               <div className="bg-slate-800/50 border border-slate-700/80 rounded-xl px-4 py-3 text-center lg:text-right">
                 <div className="flex items-center justify-center lg:justify-end gap-1.5 mb-0.5">

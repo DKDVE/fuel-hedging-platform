@@ -178,9 +178,9 @@ export function DashboardPage() {
           glowColor="from-amber-600"
         />
 
-        <div title="MAPE of ensemble forecast (ARIMA + LSTM + XGBoost) vs validation set. Lower is better.">
+        <div title="Accuracy is MAPE. <8% on target.">
           <KPICard
-            title="Forecast Accuracy (MAPE)"
+            title={`Forecast Accuracy (MAPE, <8% target)`}
             value={formatPct(mapeValue, 2)}
             trend={mapeNum < 8 ? 'down' : 'up'}
             trendValue={mapeNum < 8 ? 'On target' : 'Above target'}
