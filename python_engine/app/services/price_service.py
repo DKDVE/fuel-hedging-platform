@@ -57,11 +57,11 @@ class PriceService:
 
     def __init__(self):
         self.use_live_feed: bool = settings.USE_LIVE_FEED
-        self.tick_interval: float = (
-            float(settings.YAHOO_FINANCE_UPDATE_INTERVAL)
-            if settings.USE_LIVE_FEED
-            else float(settings.SIMULATION_INTERVAL_SECONDS)
-        )
+        # SSE push rate — always 2 seconds so the dashboard stays animated
+        self.tick_interval: float = float(settings.SIMULATION_INTERVAL_SECONDS)
+        # Yahoo fetch rate — only re-fetch from Yahoo this often (default 300s)
+        self.yahoo_fetch_interval: float = float(settings.YAHOO_FINANCE_UPDATE_INTERVAL)
+        self._last_yahoo_fetch: float = 0.0  # monotonic time of last Yahoo fetch
         self.history: Deque[PriceTick] = deque(maxlen=500)
         self.subscribers: list[asyncio.Queue] = []
         self.task: Optional[asyncio.Task] = None
@@ -245,35 +245,66 @@ class PriceService:
         )
 
     async def _price_loop(self):
-        """Background task: generate/fetch prices and publish to subscribers."""
+        """Background task: generate/fetch prices and publish to subscribers every 2 seconds.
+
+        In live mode:
+          - Fetches real prices from Yahoo Finance every yahoo_fetch_interval seconds.
+          - Between Yahoo fetches, generates a micro-GBM step for smooth animation
+            but keeps the 'yahoo_finance' source label from the last real fetch.
+        In simulation mode:
+          - Generates a new GBM tick every tick_interval seconds.
+        """
+        import time
+
         while self.running:
             try:
-                # Generate or fetch next tick
                 if self.use_live_feed:
-                    try:
-                        tick = await self._fetch_live_tick()
-                    except Exception as e:
-                        logger.warning("live_feed_error_falling_back", error=str(e))
+                    now = time.monotonic()
+                    cache_stale = (now - self._last_yahoo_fetch) >= self.yahoo_fetch_interval
+
+                    if cache_stale:
+                        # Time to fetch fresh prices from Yahoo
+                        try:
+                            tick = await self._fetch_live_tick()
+                            self._last_yahoo_fetch = time.monotonic()
+                        except Exception as e:
+                            logger.warning("live_feed_error_falling_back", error=str(e))
+                            tick = self._generate_simulation_tick()
+                    else:
+                        # Between Yahoo fetches: animate with GBM but keep live source label
                         tick = self._generate_simulation_tick()
+                        last = self.history[-1] if self.history else None
+                        if last and last.source != "simulation":
+                            # Preserve live source label so badge stays green
+                            tick = PriceTick(
+                                time=tick.time,
+                                jet_fuel_spot=tick.jet_fuel_spot,
+                                heating_oil_futures=tick.heating_oil_futures,
+                                brent_futures=tick.brent_futures,
+                                wti_futures=tick.wti_futures,
+                                crack_spread=tick.crack_spread,
+                                volatility_index=tick.volatility_index,
+                                source=last.source,
+                                quality_flag=None,
+                            )
                 else:
                     tick = self._generate_simulation_tick()
-                
+
                 # Store in history
                 self.history.append(tick)
-                
+
                 # Publish to all subscribers (non-blocking)
                 for queue in self.subscribers:
                     try:
                         queue.put_nowait(tick)
                     except asyncio.QueueFull:
-                        # Drop tick if subscriber can't keep up
                         pass
-                
-                # Wait for next tick
+
+                # Always sleep 2 seconds between SSE ticks
                 await asyncio.sleep(self.tick_interval)
-            
+
             except Exception as e:
-                # Log error but don't crash the loop
+                logger.warning("price_loop_error", error=str(e))
                 await asyncio.sleep(self.tick_interval)
 
     async def start(self):

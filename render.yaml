@@ -54,7 +54,9 @@ services:
       - key: N8N_TRIGGER_PATH
         value: /webhook/fuel-hedge-trigger
       - key: FRONTEND_ORIGIN
-        value: https://DKDVE.github.io
+        value: https://dkdve.github.io
+      - key: CORS_ORIGINS
+        value: https://dkdve.github.io,http://localhost:5173,http://localhost:3000
       # Yahoo Finance: 5 min interval to stay under ~100 req/hr (avoid rate limit/ban)
       - key: YAHOO_FINANCE_UPDATE_INTERVAL
         value: "300"

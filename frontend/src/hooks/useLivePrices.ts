@@ -16,7 +16,7 @@ export interface PriceTickShape {
   wti_futures: number;
   crack_spread: number;
   volatility_index: number;
-  source: 'simulation' | 'eia' | 'massive';
+  source: 'simulation' | 'yahoo_finance' | 'eia_api' | 'eia' | 'mixed';
   quality_flag: string | null;
 }
 
