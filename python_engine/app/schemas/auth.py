@@ -86,12 +86,18 @@ class TokenResponse(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Login response with user data."""
+    """Login response with user data.
     
+    Includes refresh_token when ENVIRONMENT=production for cross-origin fallback:
+    browsers may block third-party cookies (e.g. GitHub Pages → Render API).
+    Frontend stores it in memory and sends in body on /auth/refresh when cookie fails.
+    """
+
     model_config = ConfigDict(extra="forbid")
-    
+
     user: UserResponse
     message: str = Field(default="Login successful")
+    refresh_token: str | None = Field(default=None, description="For cross-origin fallback when cookies blocked")
 
 
 class MessageResponse(BaseModel):

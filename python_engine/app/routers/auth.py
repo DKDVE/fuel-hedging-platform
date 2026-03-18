@@ -146,7 +146,12 @@ async def _do_login(
 
     logger.info("user_login", user_id=str(user.id), email=user.email)
 
-    return LoginResponse(user=UserResponse.model_validate(user))
+    # Include refresh_token in body for cross-origin fallback (cookies may be blocked)
+    refresh_in_body = settings.ENVIRONMENT == "production"
+    return LoginResponse(
+        user=UserResponse.model_validate(user),
+        refresh_token=refresh_token if refresh_in_body else None,
+    )
 
 
 @router.post("/refresh", response_model=TokenResponse)

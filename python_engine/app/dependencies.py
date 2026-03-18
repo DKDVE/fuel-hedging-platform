@@ -43,28 +43,25 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def get_current_user(
     access_token: Annotated[str | None, Cookie()] = None,
+    authorization: Annotated[str | None, Header()] = None,
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    """Get the current authenticated user from JWT cookie.
-    
-    Args:
-        access_token: JWT token from httpOnly cookie
-        db: Database session
-        
-    Returns:
-        The authenticated User model
-        
-    Raises:
-        HTTPException: 401 if token is missing, invalid, or user not found
+    """Get the current authenticated user from JWT cookie or Authorization header.
+
+    Cookie is primary (same-origin). Authorization: Bearer <token> is fallback for
+    cross-origin when third-party cookies are blocked (e.g. GitHub Pages → Render).
     """
-    if not access_token:
+    token = access_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error_code": "MISSING_TOKEN", "message": "Authentication required"},
         )
     
     try:
-        user_id = validate_access_token(access_token)
+        user_id = validate_access_token(token)
     except AuthenticationError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -211,19 +208,23 @@ def require_permission(permission: str):
 
 async def analytics_or_n8n_auth(
     access_token: Annotated[str | None, Cookie()] = None,
+    authorization: Annotated[str | None, Header()] = None,
     n8n_key: Annotated[str | None, Header(alias="X-N8N-API-Key")] = None,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> User | None:
     """Accept JWT (returns User) or X-N8N-API-Key (returns None) for analytics read endpoints.
 
-    Used by endpoints called by n8n workflow (forecast/latest, var/latest, etc.).
+    JWT from cookie or Authorization: Bearer header (cross-origin fallback).
     """
     if n8n_key and hmac.compare_digest(n8n_key, settings.N8N_WEBHOOK_SECRET):
         return None  # n8n auth OK
-    if access_token:
+    token = access_token
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+    if token:
         try:
-            user_id = validate_access_token(access_token)
+            user_id = validate_access_token(token)
             user_repo = UserRepository(db)
             user = await user_repo.get_by_id(user_id)
             if user and user.is_active:

@@ -23,13 +23,30 @@ const api: AxiosInstance = axios.create({
   },
 });
 
+/** Access token in memory for cross-origin fallback when cookies are blocked. */
+let accessTokenRef: string | null = null;
+
+export function setAccessToken(token: string | null): void {
+  accessTokenRef = token;
+}
+
 api.interceptors.request.use((config) => {
   config.headers['X-Request-ID'] = crypto.randomUUID();
+  if (accessTokenRef) {
+    config.headers.Authorization = `Bearer ${accessTokenRef}`;
+  }
   return config;
 });
 
 let isRefreshing = false;
 const failedQueue: Array<{ resolve: (v: unknown) => void; reject: (e: unknown) => void }> = [];
+
+/** Refresh token in memory for cross-origin fallback when cookies are blocked. */
+let refreshTokenRef: string | null = null;
+
+export function setRefreshToken(token: string | null): void {
+  refreshTokenRef = token;
+}
 
 const processQueue = (error: unknown) => {
   failedQueue.forEach(({ resolve, reject }) => {
@@ -52,11 +69,19 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
       try {
-        await api.post('/auth/refresh');
+        // Send refresh token in body when cookies are blocked (cross-origin e.g. GitHub Pages → Render)
+        const body = refreshTokenRef ? { refresh_token: refreshTokenRef } : undefined;
+        const res = await api.post<{ access_token: string; refresh_token: string }>('/auth/refresh', body);
+        if (res.data) {
+          if (res.data.access_token) accessTokenRef = res.data.access_token;
+          if (res.data.refresh_token) refreshTokenRef = res.data.refresh_token;
+        }
         processQueue(null);
         return api(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError);
+        refreshTokenRef = null;
+        accessTokenRef = null;
         if (!window.location.pathname.includes('/login')) {
           const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '') || '';
           window.location.href = `${base}/login`;

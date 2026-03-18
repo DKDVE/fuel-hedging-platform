@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { UserResponse } from '@/types/api';
-import apiClient from '@/lib/api';
+import apiClient, { setAccessToken, setRefreshToken } from '@/lib/api';
 import { ROLE_PERMISSIONS, type Permission } from '@/constants/permissions';
 
 interface AuthContextType {
@@ -54,10 +54,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const response = await apiClient.post('/auth/login', { email, password });
-    const { user: userData } = response.data;
+    const response = await apiClient.post<{ user: UserResponse; refresh_token?: string }>('/auth/login', { email, password });
+    const { user: userData, refresh_token } = response.data;
     setUser(userData);
     localStorage.setItem('user', JSON.stringify(userData));
+    // Cross-origin fallback: store refresh token when cookies are blocked
+    if (refresh_token) {
+      setRefreshToken(refresh_token);
+    }
   };
 
   const logout = async () => {
@@ -68,6 +72,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setUser(null);
       localStorage.removeItem('user');
+      setAccessToken(null);
+      setRefreshToken(null);
     }
   };
 
