@@ -62,6 +62,15 @@ services:
         value: "300"
       - key: YAHOO_FINANCE_CACHE_TTL
         value: "300"
+      # Starter 512MB: skip TensorFlow/LSTM during pipeline (avoids OOM). Upgrade RAM + set true for LSTM.
+      - key: ENABLE_LSTM_INFERENCE
+        value: "false"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: TF_CPP_MIN_LOG_LEVEL
+        value: "2"
+      - key: OMP_NUM_THREADS
+        value: "1"
 
   # ── n8n Web Service (must be web to receive API webhook triggers) ──────────────
   - type: web

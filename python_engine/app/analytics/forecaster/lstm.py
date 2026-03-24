@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from app.analytics.domain import ForecastResult
+from app.config import get_settings
 from app.constants import MAPE_TARGET
 
 
@@ -47,10 +48,18 @@ class LSTMForecaster:
         Raises:
             FileNotFoundError: If model file not found
         """
+        if not get_settings().ENABLE_LSTM_INFERENCE:
+            raise FileNotFoundError(
+                "LSTM inference disabled (ENABLE_LSTM_INFERENCE=false). "
+                "Use ARIMA+XGBoost ensemble only, or enable after increasing server RAM."
+            )
         try:
-            # Import tensorflow only when needed (not in requirements for this phase)
+            # Import tensorflow only when needed — large memory footprint on small instances
             import tensorflow as tf
-            
+
+            tf.config.threading.set_intra_op_parallelism_threads(1)
+            tf.config.threading.set_inter_op_parallelism_threads(1)
+
             model_file = Path(self.model_path)
             if not model_file.exists():
                 raise FileNotFoundError(

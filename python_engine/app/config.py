@@ -100,6 +100,10 @@ class Settings:
     MAX_COVERAGE_RATIO: float = 1.10
     PIPELINE_TIMEOUT_MINUTES: int = 15
 
+    # Inference: TensorFlow + LSTM uses ~200–400MB+ RAM. Default off (ARIMA + XGBoost only).
+    # Set ENABLE_LSTM_INFERENCE=true when server has enough RAM (e.g. 1GB+).
+    ENABLE_LSTM_INFERENCE: bool = os.getenv("ENABLE_LSTM_INFERENCE", "false").lower() == "true"
+
 
 settings = Settings()
 
