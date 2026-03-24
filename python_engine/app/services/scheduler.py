@@ -1,20 +1,21 @@
 """Background scheduler for periodic tasks using APScheduler.
 
 Handles:
-- Daily analytics pipeline trigger (at 00:00 UTC)
+- Daily analytics pipeline (at 00:00 UTC) — full Python pipeline + n8n at completion
 - Recommendation SLA monitoring (every hour)
 - Price data quality checks (every 15 minutes)
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
-import httpx
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import get_settings
+from app.services.pipeline_runner import run_analytics_pipeline_background
 
 log = structlog.get_logger()
 settings = get_settings()
@@ -24,51 +25,18 @@ _scheduler: AsyncIOScheduler | None = None
 
 
 async def trigger_daily_analytics_pipeline() -> None:
-    """Trigger n8n workflow to run daily analytics + recommendation generation.
-    
-    Called at 00:00 UTC daily.
-    Calls n8n webhook directly (avoids API_INTERNAL_URL resolution on Render).
+    """Run the full analytics pipeline daily (same as Dashboard → Run Pipeline).
+
+    Previously only called the n8n webhook, which created placeholder analytics rows
+    with no MAPE/VaR. The Python pipeline now runs first; it triggers n8n on success.
     """
     log.info("scheduler.trigger_daily_analytics_pipeline", utc_time=datetime.now(timezone.utc))
-
-    n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
-    payload = {
-        "run_id": f"scheduled-{datetime.now(timezone.utc).strftime('%Y%m%d')}",
-        "analytics_summary": {},
-        "trigger_type": "daily_scheduled",
-        "triggered_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+    notional = Decimal("10000000")
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                n8n_url,
-                json=payload,
-                headers={"X-N8N-API-Key": settings.N8N_WEBHOOK_SECRET},
-            )
-            response.raise_for_status()
-
-            log.info(
-                "daily_analytics_triggered",
-                status_code=response.status_code,
-                run_id=payload["run_id"],
-            )
-
-    except httpx.HTTPStatusError as e:
-        log.error(
-            "daily_analytics_trigger_failed",
-            status_code=e.response.status_code,
-            body=e.response.text,
-        )
-    except httpx.RequestError as e:
-        log.error(
-            "daily_analytics_trigger_network_error",
-            error=str(e),
-            target_host=n8n_url.split("/")[2] if "//" in n8n_url else "unknown",
-            hint="Set N8N_TRIGGER_URL to full URL: https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger",
-        )
+        await run_analytics_pipeline_background(notional)
+        log.info("daily_analytics_pipeline_finished")
     except Exception as e:
-        log.error("daily_analytics_trigger_unexpected_error", error=str(e), exc_info=True)
+        log.error("daily_analytics_pipeline_error", error=str(e), exc_info=True)
 
 
 async def check_recommendation_slas() -> None:

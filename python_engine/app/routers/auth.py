@@ -42,6 +42,11 @@ logger = structlog.get_logger()
 settings = get_settings()
 
 
+def _is_production_deployment() -> bool:
+    """Treat production, prod, and Render-style env as production for cookies and token body."""
+    return settings.ENVIRONMENT.lower() in ("production", "prod")
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     request: Request,
@@ -113,8 +118,9 @@ async def _do_login(
 
     # SameSite=None required for cross-origin (e.g. GitHub Pages → Render API)
     # SameSite=Strict blocks cookies on cross-origin requests
-    _samesite = "none" if settings.ENVIRONMENT == "production" else "strict"
-    _secure = settings.ENVIRONMENT == "production"
+    _prod = _is_production_deployment()
+    _samesite = "none" if _prod else "strict"
+    _secure = _prod
 
     response.set_cookie(
         key="access_token",
@@ -146,11 +152,12 @@ async def _do_login(
 
     logger.info("user_login", user_id=str(user.id), email=user.email)
 
-    # Include refresh_token in body for cross-origin fallback (cookies may be blocked)
-    refresh_in_body = settings.ENVIRONMENT == "production"
+    # Include tokens in body for cross-origin fallback (cookies may be blocked)
+    refresh_in_body = _prod
     return LoginResponse(
         user=UserResponse.model_validate(user),
         refresh_token=refresh_token if refresh_in_body else None,
+        access_token=access_token if refresh_in_body else None,
     )
 
 
@@ -189,8 +196,9 @@ async def refresh_tokens(
     access_token = create_access_token({"sub": str(user.id)})
     new_refresh_token = create_refresh_token(str(user.id))
     
-    _samesite = "none" if settings.ENVIRONMENT == "production" else "strict"
-    _secure = settings.ENVIRONMENT == "production"
+    _prod = _is_production_deployment()
+    _samesite = "none" if _prod else "strict"
+    _secure = _prod
 
     response.set_cookie(
         key="access_token",
@@ -218,9 +226,10 @@ async def refresh_tokens(
 @router.post("/logout")
 async def logout(response: Response, current_user: CurrentUser) -> MessageResponse:
     """Logout user by clearing cookies."""
-    _samesite = "none" if settings.ENVIRONMENT == "production" else "strict"
-    response.delete_cookie("access_token", samesite=_samesite, secure=settings.ENVIRONMENT == "production")
-    response.delete_cookie("refresh_token", samesite=_samesite, secure=settings.ENVIRONMENT == "production")
+    _prod = _is_production_deployment()
+    _samesite = "none" if _prod else "strict"
+    response.delete_cookie("access_token", samesite=_samesite, secure=_prod)
+    response.delete_cookie("refresh_token", samesite=_samesite, secure=_prod)
     
     logger.info("user_logout", user_id=str(current_user.id))
     

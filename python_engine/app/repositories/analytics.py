@@ -1,12 +1,12 @@
 """Analytics run repository for pipeline execution tracking."""
 
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AnalyticsRun, AnalyticsRunStatus
@@ -52,18 +52,40 @@ class AnalyticsRepository(BaseRepository[AnalyticsRun]):
         return await self.get_mape_history(n_days=days)
 
     async def get_latest(self) -> Optional[AnalyticsRun]:
-        """Get the most recent completed analytics run.
-        
-        Returns:
-            Latest completed run or None
+        """Get the most recent completed analytics run with real pipeline metrics.
+
+        Excludes n8n-only placeholder rows (source=n8n_manual) created when
+        recommendations arrive before the Python pipeline has run.
         """
         result = await self.db.execute(
             select(AnalyticsRun)
             .where(AnalyticsRun.status == AnalyticsRunStatus.COMPLETED)
+            .where(text("(forecast_json->>'source') IS DISTINCT FROM 'n8n_manual'"))
             .order_by(desc(AnalyticsRun.run_date))
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def reset_stale_running_runs(self, max_age_hours: int = 2) -> int:
+        """Mark RUNNING pipelines older than max_age_hours as FAILED. Returns count updated."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        result = await self.db.execute(
+            select(AnalyticsRun).where(
+                AnalyticsRun.status == AnalyticsRunStatus.RUNNING,
+                AnalyticsRun.created_at < cutoff,
+            )
+        )
+        rows = result.scalars().all()
+        count = 0
+        for r in rows:
+            r.status = AnalyticsRunStatus.FAILED
+            fj = dict(r.forecast_json or {})
+            fj["error"] = "pipeline_stale_timeout"
+            r.forecast_json = fj
+            count += 1
+        if count:
+            await self.db.commit()
+        return count
 
     async def get_mape_history(self, n_days: int = 30) -> list[AnalyticsRun]:
         """Get MAPE history for the last N days.

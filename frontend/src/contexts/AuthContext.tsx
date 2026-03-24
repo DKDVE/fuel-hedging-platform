@@ -3,6 +3,8 @@ import type { UserResponse } from '@/types/api';
 import apiClient, { setAccessToken, setRefreshToken } from '@/lib/api';
 import { ROLE_PERMISSIONS, type Permission } from '@/constants/permissions';
 
+const REFRESH_SESSION_KEY = 'hedge_refresh_token';
+
 interface AuthContextType {
   user: UserResponse | null;
   loading: boolean;
@@ -34,18 +36,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return user?.role === role;
   };
 
-  // Verify session on mount — cookie may still be valid
+  // Verify session on mount — httpOnly cookies or cross-origin refresh + Bearer
   useEffect(() => {
     const initAuth = async () => {
       try {
+        const storedRefresh = sessionStorage.getItem(REFRESH_SESSION_KEY);
+        if (storedRefresh) {
+          setRefreshToken(storedRefresh);
+          try {
+            const res = await apiClient.post<{ access_token: string; refresh_token: string }>(
+              '/auth/refresh',
+              { refresh_token: storedRefresh }
+            );
+            if (res.data.access_token) setAccessToken(res.data.access_token);
+            if (res.data.refresh_token) {
+              setRefreshToken(res.data.refresh_token);
+              sessionStorage.setItem(REFRESH_SESSION_KEY, res.data.refresh_token);
+            }
+          } catch {
+            sessionStorage.removeItem(REFRESH_SESSION_KEY);
+            setRefreshToken(null);
+            setAccessToken(null);
+            localStorage.removeItem('user');
+            setUser(null);
+            setLoading(false);
+            return;
+          }
+        }
         const storedUser = localStorage.getItem('user');
-        if (storedUser) {
+        if (storedUser || storedRefresh) {
           const { data } = await apiClient.get('/auth/me');
           setUser(data);
+          localStorage.setItem('user', JSON.stringify(data));
         }
       } catch {
         setUser(null);
         localStorage.removeItem('user');
+        sessionStorage.removeItem(REFRESH_SESSION_KEY);
+        setRefreshToken(null);
+        setAccessToken(null);
       } finally {
         setLoading(false);
       }
@@ -54,13 +83,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const response = await apiClient.post<{ user: UserResponse; refresh_token?: string }>('/auth/login', { email, password });
-    const { user: userData, refresh_token } = response.data;
+    const response = await apiClient.post<{
+      user: UserResponse;
+      refresh_token?: string;
+      access_token?: string;
+    }>('/auth/login', { email, password });
+    const { user: userData, refresh_token, access_token } = response.data;
     setUser(userData);
     localStorage.setItem('user', JSON.stringify(userData));
-    // Cross-origin fallback: store refresh token when cookies are blocked
+    if (access_token) {
+      setAccessToken(access_token);
+    }
     if (refresh_token) {
       setRefreshToken(refresh_token);
+      sessionStorage.setItem(REFRESH_SESSION_KEY, refresh_token);
     }
   };
 
@@ -72,6 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setUser(null);
       localStorage.removeItem('user');
+      sessionStorage.removeItem(REFRESH_SESSION_KEY);
       setAccessToken(null);
       setRefreshToken(null);
     }

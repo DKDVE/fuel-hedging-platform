@@ -22,7 +22,6 @@ from app.config import get_settings
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.base import AsyncSessionLocal
 from app.dependencies import AdminUser, AnalystUser, AnalyticsOrN8nAuth, CurrentUser, DatabaseSession, require_permission
 from app.db.models import AnalyticsRun, AnalyticsRunStatus, BacktestRun, HedgeRecommendation
 from app.repositories import AnalyticsRepository
@@ -39,7 +38,7 @@ from app.schemas.analytics import (
 from app.schemas.common import PaginatedResponse
 from app.analytics.scenarios import SCENARIOS, SCENARIOS_BY_ID
 from app.repositories import ConfigRepository
-from app.services.analytics_pipeline import AnalyticsPipeline
+from app.services.pipeline_runner import run_analytics_pipeline_background
 from app.services.data_ingestion import import_historical_csv
 from app.services.price_service import get_price_service
 from app.services.scenario_service import ScenarioService
@@ -113,14 +112,16 @@ async def list_analytics_runs(
     )
 
     def _run_to_response(r: AnalyticsRun) -> AnalyticsRunResponse:
+        fj = r.forecast_json or {}
+        is_n8n_placeholder = fj.get("source") == "n8n_manual"
         return AnalyticsRunResponse(
             id=r.id,
             run_date=r.run_date,
             status=r.status,
-            forecast_mape=r.mape,
-            var_95_usd=(r.var_results or {}).get("var_usd"),
-            basis_r2=(r.basis_metrics or {}).get("r2_heating_oil"),
-            optimal_hr=(r.optimizer_result or {}).get("optimal_hr"),
+            forecast_mape=None if is_n8n_placeholder else r.mape,
+            var_95_usd=None if is_n8n_placeholder else (r.var_results or {}).get("var_usd"),
+            basis_r2=None if is_n8n_placeholder else (r.basis_metrics or {}).get("r2_heating_oil"),
+            optimal_hr=None if is_n8n_placeholder else (r.optimizer_result or {}).get("optimal_hr"),
             pipeline_start_time=None,
             pipeline_end_time=None,
             error_message=(r.forecast_json or {}).get("error") if r.status == AnalyticsRunStatus.FAILED else None,
@@ -649,16 +650,6 @@ def _trigger_n8n_immediate(run_id: str, triggered_by: str) -> None:
     asyncio.create_task(_do_trigger())
 
 
-async def _run_pipeline_background(notional_usd: Decimal) -> None:
-    """Run pipeline in background with fresh DB session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            pipeline = AnalyticsPipeline(session, notional_usd=notional_usd)
-            await pipeline.execute_daily_run()
-        except Exception as e:
-            logger.error("pipeline_background_failed", error=str(e))
-
-
 @router.get("/n8n-diagnostics", include_in_schema=False)
 async def n8n_diagnostics(
     current_user: AdminUser,
@@ -736,6 +727,9 @@ async def trigger_analytics_run(
     Returns 409 Conflict if pipeline is already running.
     """
     repo = AnalyticsRepository(db)
+    stale_reset = await repo.reset_stale_running_runs(max_age_hours=2)
+    if stale_reset:
+        logger.info("stale_running_pipeline_reset", count=stale_reset)
     running = await repo.get_running_pipeline()
     if running:
         raise HTTPException(
@@ -748,7 +742,7 @@ async def trigger_analytics_run(
         )
 
     notional = trigger_data.notional_usd if trigger_data.notional_usd else Decimal("10000000")
-    asyncio.create_task(_run_pipeline_background(notional))
+    asyncio.create_task(run_analytics_pipeline_background(notional))
 
     # n8n is triggered by the pipeline when it completes (~8 min) — not immediately.
     # Immediate trigger would fetch empty data since analytics run does not exist yet.

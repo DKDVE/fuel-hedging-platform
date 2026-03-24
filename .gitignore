@@ -11,6 +11,8 @@
 
 # Python secrets and caches
 python_engine/venv/
+python_engine/.venv/
+**/.venv/
 **/venv/
 __pycache__/
 *.pyc

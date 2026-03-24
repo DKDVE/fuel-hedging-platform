@@ -98,6 +98,7 @@ class LoginResponse(BaseModel):
     user: UserResponse
     message: str = Field(default="Login successful")
     refresh_token: str | None = Field(default=None, description="For cross-origin fallback when cookies blocked")
+    access_token: str | None = Field(default=None, description="Short-lived JWT when cookies blocked (use Authorization header)")
 
 
 class MessageResponse(BaseModel):
