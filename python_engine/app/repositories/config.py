@@ -117,6 +117,8 @@ class ConfigRepository(BaseRepository[PlatformConfig]):
             "collateral_limit": config_dict.get("collateral_limit", COLLATERAL_LIMIT),
             "ifrs9_r2_min": config_dict.get("ifrs9_r2_min", IFRS9_R2_MIN_PROSPECTIVE),
             "max_coverage_ratio": config_dict.get("max_coverage_ratio", MAX_COVERAGE_RATIO),
+            "monthly_consumption_bbl": config_dict.get("monthly_consumption_bbl", 100_000),
+            "hr_band_min": config_dict.get("hr_band_min", 0.40),
         }
 
     async def get_hr_cap(self) -> float:
@@ -140,3 +142,8 @@ class ConfigRepository(BaseRepository[PlatformConfig]):
         
         value = await self.get_value("collateral_limit")
         return float(value.get("value", COLLATERAL_LIMIT)) if value else COLLATERAL_LIMIT
+
+    async def get_monthly_consumption(self) -> float:
+        """Get monthly fuel consumption in barrels. Falls back to 100,000."""
+        value = await self.get_value("monthly_consumption_bbl")
+        return float(value.get("value", 100_000)) if value else 100_000

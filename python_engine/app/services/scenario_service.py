@@ -69,6 +69,29 @@ class ScenarioService:
             var_curve[-1] if var_curve else None,
         )
 
+        # Demand-contextualised P&L analysis
+        monthly_consumption_bbl = float(constraints.get("forecast_consumption_bbl", 100_000))
+
+        # At the recommended post-scenario HR
+        hedged_cost_per_bbl = (
+            opt_result.optimal_hr * current_price
+            + (1 - opt_result.optimal_hr) * stressed_price
+        )
+        unhedged_cost_per_bbl = stressed_price
+
+        monthly_saving_usd = (unhedged_cost_per_bbl - hedged_cost_per_bbl) * monthly_consumption_bbl
+        monthly_saving_usd = round(float(monthly_saving_usd), 0)
+
+        # What a pre-emptive 70% hedge would have done (industry best-practice)
+        preemptive_hr = 0.70
+        preemptive_hedged_cost = (
+            preemptive_hr * current_price
+            + (1 - preemptive_hr) * stressed_price
+        )
+        preemptive_saving_usd = round(
+            float((unhedged_cost_per_bbl - preemptive_hedged_cost) * monthly_consumption_bbl), 0
+        )
+
         narrative = self._generate_narrative(
             scenario, opt_result, stressed_var, current_price, stressed_price
         )
@@ -95,6 +118,16 @@ class ScenarioService:
             },
             "risk_narrative": narrative,
             "constraints_satisfied": not bool(opt_result.constraint_violations),
+            "demand_pnl": {
+                "monthly_consumption_bbl": monthly_consumption_bbl,
+                "current_price_per_bbl": round(current_price, 2),
+                "stressed_price_per_bbl": round(stressed_price, 2),
+                "hedged_cost_per_bbl": round(hedged_cost_per_bbl, 2),
+                "unhedged_cost_per_bbl": round(unhedged_cost_per_bbl, 2),
+                "monthly_saving_usd": monthly_saving_usd,
+                "preemptive_70pct_saving_usd": preemptive_saving_usd,
+            },
+            "hindsight": self._generate_hindsight(scenario, monthly_saving_usd),
         }
 
     def _generate_narrative(
@@ -129,4 +162,37 @@ class ScenarioService:
                 if not opt_result.constraint_violations
                 else "Some constraints require review."
             )
+        )
+
+    def _generate_hindsight(
+        self,
+        scenario: StressScenario,
+        monthly_saving_usd: float,
+    ) -> str:
+        """Generate 'what should have been done' hindsight narrative."""
+        saving_m = monthly_saving_usd / 1_000_000
+        if scenario.price_shock_pct <= -0.30:
+            return (
+                f"In this scenario, hedging worked against you — lower spot prices meant "
+                f"the unhedged position was cheaper. A carrier at 70% hedge would have "
+                f"{'paid' if monthly_saving_usd < 0 else 'saved'} approximately "
+                f"${abs(saving_m):.1f}M per month vs. an unhedged position. "
+                f"The lesson: before a demand collapse, reduce hedge ratio to 40–50% and "
+                f"favour options over futures so you retain the ability to exit at low cost."
+            )
+        if scenario.price_shock_pct >= 0.30:
+            return (
+                f"A carrier fully unhedged during this scenario paid approximately "
+                f"${abs(saving_m):.1f}M per month more than one hedged at 70%. "
+                f"The key signal to act on before this type of event: watch the crack spread "
+                f"z-score — when it exceeds +1.5σ for more than 5 consecutive days, "
+                f"near-term hedging becomes urgent. Heating oil futures with 3-month maturity "
+                f"are the most effective instrument at this horizon."
+            )
+        return (
+            f"Under these conditions, a 70% hedge would have "
+            f"{'saved' if monthly_saving_usd >= 0 else 'cost'} "
+            f"${abs(saving_m):.1f}M per month vs. the unhedged position. "
+            f"No unusual action was required — the platform's standard dynamic "
+            f"strategy handles this scenario within normal parameters."
         )

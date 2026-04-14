@@ -116,26 +116,14 @@ export function LivePriceTicker({ prices, isConnected }: PriceTickerProps) {
                 previousPrice?.jet_fuel_spot || null
               )}
             />
-            <div className="hidden md:flex">
-              <PriceItem
-                label="Heating Oil"
-                price={latestPrice.heating_oil_futures}
-                change={calculateChange(
-                  latestPrice.heating_oil_futures,
-                  previousPrice?.heating_oil_futures || null
-                )}
-              />
-            </div>
-            <div className="hidden md:flex">
-              <PriceItem
-                label="Brent Crude"
-                price={latestPrice.brent_futures}
-                change={calculateChange(
-                  latestPrice.brent_futures,
-                  previousPrice?.brent_futures || null
-                )}
-              />
-            </div>
+            <PriceItem
+              label="Brent Crude"
+              price={latestPrice.brent_futures}
+              change={calculateChange(
+                latestPrice.brent_futures,
+                previousPrice?.brent_futures || null
+              )}
+            />
             <div className="hidden md:flex">
               <PriceItem
                 label="WTI Crude"
@@ -146,18 +134,26 @@ export function LivePriceTicker({ prices, isConnected }: PriceTickerProps) {
                 )}
               />
             </div>
-            <PriceItem
-              label="Crack Spread"
-              price={latestPrice.crack_spread}
-              change={calculateChange(
-                latestPrice.crack_spread,
-                previousPrice?.crack_spread || null
-              )}
-            />
-            <PriceItem
-              label="Volatility"
-              price={latestPrice.volatility_index}
-            />
+            <div className="hidden md:flex">
+              <PriceItem
+                label="Heating Oil (Hedge Proxy)"
+                price={latestPrice.heating_oil_futures}
+                change={calculateChange(
+                  latestPrice.heating_oil_futures,
+                  previousPrice?.heating_oil_futures || null
+                )}
+              />
+            </div>
+            <div className="hidden md:flex">
+              <PriceItem
+                label="Crack Spread"
+                price={latestPrice.crack_spread}
+                change={calculateChange(
+                  latestPrice.crack_spread,
+                  previousPrice?.crack_spread || null
+                )}
+              />
+            </div>
           </>
         )}
       </div>

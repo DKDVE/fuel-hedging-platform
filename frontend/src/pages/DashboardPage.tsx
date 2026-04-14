@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { LivePriceTicker } from '@/components/dashboard/LivePriceTicker';
 import { ForecastChart } from '@/components/dashboard/ForecastChart';
@@ -7,9 +8,11 @@ import { usePendingRecommendations } from '@/hooks/useRecommendations';
 import { useLatestForecast } from '@/hooks/useForecast';
 import { useLivePrices } from '@/hooks/useLivePrices';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useAuth } from '@/contexts/AuthContext';
+import apiClient from '@/lib/api';
 import { Link } from 'react-router-dom';
-import { formatMillions, formatRatio, formatPct } from '@/lib/formatters';
-import { TrendingDown, Shield, DollarSign, Target, Play, Database } from 'lucide-react';
+import { formatInt, formatMillions, formatRatio, formatPct } from '@/lib/formatters';
+import { TrendingDown, Shield, DollarSign, Target, Play, Database, Pencil, Check, X, Fuel } from 'lucide-react';
 import { toast } from 'sonner';
 
 const VAR_LIMIT_USD = 5_000_000;
@@ -18,6 +21,7 @@ export function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useAnalyticsSummary();
   const { data: pendingRecs, isLoading: _recoLoading } = usePendingRecommendations();
   const { data: forecastResponse, isLoading: forecastLoading } = useLatestForecast();
+  const { user } = useAuth();
   const forecastData = forecastResponse?.data_points ?? [];
   const forecastMape = forecastResponse?.mape ?? null;
   const { prices, isConnected } = useLivePrices();
@@ -27,6 +31,39 @@ export function DashboardPage() {
   const canTriggerPipeline = hasPermission('trigger:pipeline');
   const canLoadCsv = hasPermission('read:analytics');
   const loadCsv = useLoadCsv();
+  const [consumption, setConsumption] = useState(100_000);
+  const [savedConsumption, setSavedConsumption] = useState(100_000);
+  const consumptionChanged = consumption !== savedConsumption;
+  const userRole = (user?.role as string | undefined)?.toLowerCase();
+  const canEditConsumption =
+    userRole === 'cfo' ||
+    userRole === 'risk_manager' ||
+    userRole === 'admin';
+
+  useEffect(() => {
+    apiClient.get('/analytics/config')
+      .then((res: { data: Record<string, unknown> }) => {
+        const val = res.data?.monthly_consumption_bbl;
+        if (typeof val === 'number' && val > 0) {
+          setConsumption(val);
+          setSavedConsumption(val);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveConsumption = async () => {
+    try {
+      await apiClient.patch('/analytics/config', {
+        key: 'monthly_consumption_bbl',
+        value: consumption,
+      });
+      setSavedConsumption(consumption);
+      toast.success('Monthly uplift saved');
+    } catch {
+      toast.error('Failed to save');
+    }
+  };
 
   const handleLoadCsv = async () => {
     if (loadCsv.isPending) return;
@@ -94,6 +131,34 @@ export function DashboardPage() {
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
+      {(userRole === 'cfo' || userRole === 'risk_manager') && (
+        <div className="card border-l-4 border-blue-500 bg-blue-950/20 mb-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-blue-400 uppercase tracking-wide mb-1">
+                Today's Position
+              </p>
+              <p className="text-base font-semibold text-white">
+                {pendingRecs && pendingRecs.length > 0
+                  ? `${pendingRecs.length} recommendation${pendingRecs.length > 1 ? 's' : ''} awaiting your approval`
+                  : 'No pending decisions — portfolio is current'}
+              </p>
+              {hrNum > 0 && (
+                <p className="text-sm text-slate-400 mt-0.5">
+                  Currently hedging {formatRatio(hedgeRatio)} of fuel exposure
+                  {mapeNum > 0 && ` · Forecast MAPE ${formatPct(mapeNum, 1)} vs 8% target`}
+                </p>
+              )}
+            </div>
+            {pendingRecs && pendingRecs.length > 0 && (
+              <Link to="/recommendations" className="btn btn-primary text-sm shrink-0 ml-4">
+                Review Now →
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -167,7 +232,7 @@ export function DashboardPage() {
           title="Collateral"
           value={formatPct(collateralPct)}
           trend={collNum > 12 ? 'up' : 'neutral'}
-          trendValue={`${formatPct((collNum / 15) * 100, 0)} of reserves`}
+          trendValue={`${formatPct((collNum / 15) * 100, 0)} of limit used`}
           threshold={{
             value: 15.0,
             current: collNum,
@@ -178,12 +243,12 @@ export function DashboardPage() {
           glowColor="from-amber-600"
         />
 
-        <div title="Accuracy is MAPE. <8% on target.">
+        <div title="Forecast MAPE target is <8%.">
           <KPICard
-            title={`Forecast Accuracy (MAPE, <8% target)`}
+            title="Forecast MAPE"
             value={formatPct(mapeValue, 2)}
             trend={mapeNum < 8 ? 'down' : 'up'}
-            trendValue={mapeNum < 8 ? 'On target' : 'Above target'}
+            trendValue={mapeNum < 8 ? `${formatPct(mapeNum, 1)} vs 8% industry avg` : 'Above target'}
             threshold={{
               value: 8.0,
               current: mapeNum,
@@ -196,13 +261,142 @@ export function DashboardPage() {
         </div>
       </div>
 
+      <div className="card">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Fuel className="h-5 w-5 text-blue-400" />
+            <div>
+              <h3 className="text-sm font-semibold text-white uppercase tracking-wide">
+                Demand & Coverage
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Monthly fuel uplift vs. hedged position
+              </p>
+            </div>
+          </div>
+          {consumptionChanged && canEditConsumption && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setConsumption(savedConsumption)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs rounded-lg font-medium transition-colors"
+                title="Discard changes"
+              >
+                <X className="h-3.5 w-3.5" />
+                Revert
+              </button>
+              <button
+                onClick={handleSaveConsumption}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded-lg font-medium transition-colors"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Save
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Three KPI columns */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+          {/* Monthly Uplift */}
+          <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">
+              Monthly Uplift
+            </p>
+            <p className="text-2xl font-bold text-white">
+              {formatInt(consumption)}
+              <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
+            </p>
+            {canEditConsumption && (
+              <p className="text-xs text-blue-400 mt-1 flex items-center gap-1">
+                <Pencil className="h-3 w-3" />
+                Adjust below
+              </p>
+            )}
+          </div>
+
+          {/* Hedged Volume */}
+          <div className="bg-green-950/30 rounded-xl p-4 border border-green-800/40">
+            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">
+              Hedged Volume
+            </p>
+            <p className="text-2xl font-bold text-green-400">
+              {formatInt(Math.round(consumption * hrNum))}
+              <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
+            </p>
+            <p className="text-xs text-green-600 mt-1">
+              {formatRatio(hedgeRatio)} of uplift
+            </p>
+          </div>
+
+          {/* Unhedged Volume */}
+          <div className="bg-amber-950/20 rounded-xl p-4 border border-amber-800/30">
+            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">
+              Unhedged Volume
+            </p>
+            <p className="text-2xl font-bold text-amber-400">
+              {formatInt(Math.round(consumption * (1 - hrNum)))}
+              <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
+            </p>
+            <p className="text-xs text-amber-600 mt-1">
+              {formatRatio(typeof hedgeRatio === 'number' ? 1 - hrNum : null)} exposed
+            </p>
+          </div>
+        </div>
+
+        {/* Coverage bar */}
+        <div className="mb-5">
+          <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+            <span>0 bbl</span>
+            <span className="text-slate-300 font-medium">
+              {formatRatio(hedgeRatio)} hedged
+            </span>
+            <span>{formatInt(consumption)} bbl</span>
+          </div>
+          <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-green-600 to-green-400 rounded-full transition-all duration-300"
+              style={{ width: `${Math.min(hrNum * 100, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Slider — CFO/Risk Manager/Admin only */}
+        {canEditConsumption && (
+          <div className="border-t border-slate-700 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-slate-400">
+                Adjust monthly uplift forecast
+              </p>
+              <span className="text-xs font-mono text-blue-300">
+                {formatInt(consumption)} bbl
+              </span>
+            </div>
+            <input
+              type="range"
+              min={10_000}
+              max={500_000}
+              step={5_000}
+              value={consumption}
+              onChange={(e) => setConsumption(Number(e.target.value))}
+              className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-blue-500"
+            />
+            <div className="flex justify-between text-xs text-slate-600 mt-1">
+              <span>10k</span>
+              <span>250k</span>
+              <span>500k</span>
+            </div>
+          </div>
+        )}
+      </div>
+ 
       {/* Forecast Chart */}
       <ForecastChart
-          data={forecastData || []}
-          isLoading={forecastLoading}
-          fromAnalytics={(forecastData?.length ?? 0) > 0}
-          mapeFromApi={forecastMape}
-        />
+        data={forecastData || []}
+        isLoading={forecastLoading}
+        fromAnalytics={(forecastData?.length ?? 0) > 0}
+        mapeFromApi={forecastMape}
+      />
 
       {/* Agent Status Grid */}
       <AgentStatusGrid agents={summary?.agent_outputs || []} isLoading={summaryLoading} />

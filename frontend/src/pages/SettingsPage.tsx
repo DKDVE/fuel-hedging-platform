@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, CheckCircle, XCircle, Save, RefreshCw } from 'lucide-react';
 import { usePermissions } from '@/hooks/usePermissions';
+import apiClient from '@/lib/api';
+import { toast } from 'sonner';
 
 interface APIHealthStatus {
   source: string;
@@ -10,18 +12,56 @@ interface APIHealthStatus {
   http_status: number;
 }
 
+type InstrumentPreference =
+  | 'optimiser_decides'
+  | 'favour_futures'
+  | 'favour_options'
+  | 'favour_collars'
+  | 'favour_swaps';
+
+interface ConstraintsState {
+  hr_hard_cap: number;
+  hr_soft_warn: number;
+  collateral_limit: number;
+  mape_alert_threshold: number;
+  var_reduction_target: number;
+  monthly_consumption_bbl: number;
+  hr_band_min: number;
+  instrument_preference: InstrumentPreference;
+}
+
+interface PlatformConfigResponse {
+  hr_cap?: number;
+  collateral_limit?: number;
+  mape_target?: number;
+  var_reduction_target?: number;
+  monthly_consumption_bbl?: number;
+  hr_band_min?: number;
+  instrument_preference?: string;
+}
+
+interface ConfigPatchPayload {
+  key: string;
+  value: number | string;
+}
+
+const DEFAULT_CONSTRAINTS: ConstraintsState = {
+  hr_hard_cap: 0.80,
+  hr_soft_warn: 70,
+  collateral_limit: 15,
+  mape_alert_threshold: 10.0,
+  var_reduction_target: 0.40,
+  monthly_consumption_bbl: 100000,
+  hr_band_min: 40,
+  instrument_preference: 'optimiser_decides',
+};
+
 export function SettingsPage() {
   const { hasPermission } = usePermissions();
   const canEdit = hasPermission('edit:config');
 
-  // Mock constraint values
-  const [constraints, setConstraints] = useState({
-    hr_hard_cap: 0.80,
-    hr_soft_warn: 0.70,
-    collateral_limit: 0.15,
-    mape_alert_threshold: 10.0,
-    var_reduction_target: 0.40,
-  });
+  const [constraints, setConstraints] = useState<ConstraintsState>(DEFAULT_CONSTRAINTS);
+  const [initialConstraints, setInitialConstraints] = useState<ConstraintsState>(DEFAULT_CONSTRAINTS);
 
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -58,30 +98,106 @@ export function SettingsPage() {
     },
   ];
 
-  const handleChange = (field: keyof typeof constraints, value: number) => {
+  const handleChange = (field: keyof ConstraintsState, value: number | string) => {
     setConstraints({ ...constraints, [field]: value });
     setIsDirty(true);
   };
 
+  const buildConfigPayloads = (state: ConstraintsState): ConfigPatchPayload[] => {
+    return [
+      { key: 'monthly_consumption_bbl', value: state.monthly_consumption_bbl },
+      { key: 'hr_band_min', value: state.hr_soft_warn / 100 },
+      { key: 'instrument_preference', value: state.instrument_preference },
+      { key: 'hr_cap', value: state.hr_hard_cap },
+      { key: 'collateral_limit', value: state.collateral_limit / 100 },
+      { key: 'mape_target', value: state.mape_alert_threshold },
+      { key: 'var_reduction_target', value: state.var_reduction_target },
+    ];
+  };
+
+  const loadConfig = async (): Promise<void> => {
+    try {
+      const { data } = await apiClient.get<PlatformConfigResponse>('/analytics/config');
+      const next: ConstraintsState = {
+        hr_hard_cap: typeof data.hr_cap === 'number' ? data.hr_cap : DEFAULT_CONSTRAINTS.hr_hard_cap,
+        hr_soft_warn:
+          typeof data.hr_band_min === 'number'
+            ? data.hr_band_min * 100
+            : DEFAULT_CONSTRAINTS.hr_soft_warn,
+        collateral_limit:
+          typeof data.collateral_limit === 'number'
+            ? data.collateral_limit * 100
+            : DEFAULT_CONSTRAINTS.collateral_limit,
+        mape_alert_threshold:
+          typeof data.mape_target === 'number'
+            ? data.mape_target
+            : DEFAULT_CONSTRAINTS.mape_alert_threshold,
+        var_reduction_target:
+          typeof data.var_reduction_target === 'number'
+            ? data.var_reduction_target
+            : DEFAULT_CONSTRAINTS.var_reduction_target,
+        monthly_consumption_bbl:
+          typeof data.monthly_consumption_bbl === 'number'
+            ? data.monthly_consumption_bbl
+            : DEFAULT_CONSTRAINTS.monthly_consumption_bbl,
+        hr_band_min:
+          typeof data.hr_band_min === 'number'
+            ? data.hr_band_min * 100
+            : DEFAULT_CONSTRAINTS.hr_band_min,
+        instrument_preference:
+          data.instrument_preference === 'favour_futures' ||
+          data.instrument_preference === 'favour_options' ||
+          data.instrument_preference === 'favour_collars' ||
+          data.instrument_preference === 'favour_swaps' ||
+          data.instrument_preference === 'optimiser_decides'
+            ? data.instrument_preference
+            : DEFAULT_CONSTRAINTS.instrument_preference,
+      };
+
+      setConstraints(next);
+      setInitialConstraints(next);
+      setIsDirty(false);
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to load settings';
+      toast.error(message);
+    }
+  };
+
+  useEffect(() => {
+    void loadConfig();
+  }, []);
+
   const handleSave = async () => {
     if (!canEdit) return;
     setIsSaving(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsSaving(false);
-    setIsDirty(false);
-    console.log('Saving constraints:', constraints);
+    try {
+      const currentPayloads = buildConfigPayloads(constraints);
+      const baselineMap = new Map(
+        buildConfigPayloads(initialConstraints).map((item) => [item.key, item.value])
+      );
+      const changedPayloads = currentPayloads.filter(
+        (item) => baselineMap.get(item.key) !== item.value
+      );
+
+      for (const payload of changedPayloads) {
+        await apiClient.patch('/analytics/config', payload);
+      }
+
+      setInitialConstraints(constraints);
+      setIsDirty(false);
+      toast.success('Settings saved');
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Failed to save settings';
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleReset = () => {
-    setConstraints({
-      hr_hard_cap: 0.80,
-      hr_soft_warn: 0.70,
-      collateral_limit: 0.15,
-      mape_alert_threshold: 10.0,
-      var_reduction_target: 0.40,
-    });
-    setIsDirty(false);
+  const handleReset = async () => {
+    await loadConfig();
   };
 
   const getStatusBadge = (status: string) => {
@@ -152,6 +268,83 @@ export function SettingsPage() {
       </div>
 
       {/* Constraint Editor */}
+      <div className="card">
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold text-white mb-1">
+            Demand &amp; Strategy Policy
+          </h3>
+          <p className="text-sm text-slate-400">
+            Configure demand volume and instrument-selection guidance
+          </p>
+        </div>
+
+        <div className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Monthly Fuel Uplift (barrels)
+            </label>
+            <div className="flex items-center gap-4">
+              <input
+                type="number"
+                min="10000"
+                max="10000000"
+                step="1000"
+                value={constraints.monthly_consumption_bbl}
+                onChange={(e) =>
+                  handleChange('monthly_consumption_bbl', parseFloat(e.target.value))
+                }
+                className="input w-48"
+              />
+            </div>
+            <p className="text-sm text-slate-400 mt-2">
+              Total fuel consumed per month across all routes. Used to calculate hedged vs.
+              unhedged volume in recommendations.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Minimum Hedge Band (%)
+            </label>
+            <div className="flex items-center gap-4">
+              <input
+                type="number"
+                min="0"
+                max="70"
+                step="1"
+                value={constraints.hr_band_min}
+                onChange={(e) => handleChange('hr_band_min', parseFloat(e.target.value))}
+                className="input w-32"
+              />
+            </div>
+            <p className="text-sm text-slate-400 mt-2">
+              System will never recommend below this ratio. Industry range: 30-70%.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-300 mb-2">
+              Instrument Preference
+            </label>
+            <select
+              value={constraints.instrument_preference}
+              onChange={(e) => handleChange('instrument_preference', e.target.value)}
+              className="input w-64"
+            >
+              <option value="optimiser_decides">Optimiser decides</option>
+              <option value="favour_futures">Favour Futures</option>
+              <option value="favour_options">Favour Options</option>
+              <option value="favour_collars">Favour Collars</option>
+              <option value="favour_swaps">Favour Swaps</option>
+            </select>
+            <p className="text-sm text-slate-400 mt-2">
+              Guide the optimiser toward a preferred instrument type. &apos;Optimiser decides&apos; uses pure VaR
+              minimisation.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="card">
         <div className="flex items-center justify-between mb-6">
           <div>

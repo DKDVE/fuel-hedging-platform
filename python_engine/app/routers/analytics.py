@@ -23,7 +23,7 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import AdminUser, AnalystUser, AnalyticsOrN8nAuth, CurrentUser, DatabaseSession, require_permission
-from app.db.models import AnalyticsRun, AnalyticsRunStatus, BacktestRun, HedgeRecommendation
+from app.db.models import AnalyticsRun, AnalyticsRunStatus, BacktestRun, HedgeRecommendation, UserRole
 from app.repositories import AnalyticsRepository
 from app.schemas.analytics import (
     AnalyticsRunDetail,
@@ -564,6 +564,85 @@ async def run_stress_scenario(
     scenario_service = get_scenario_service()
     result = scenario_service.run_scenario(scenario, current_price, df, constraints)
     return result
+
+
+@router.get("/config")
+async def get_platform_config(
+    db: DatabaseSession,
+    current_user=Depends(require_permission("view:analytics")),
+) -> dict[str, object]:
+    """Return all platform config values. Analyst and above."""
+    config_repo = ConfigRepository(db)
+    all_configs = await config_repo.get_all()
+    return {
+        cfg.key: cfg.value.get("value") for cfg in all_configs
+    }
+
+
+@router.patch("/config")
+async def update_platform_config(
+    payload: dict[str, object],
+    db: DatabaseSession,
+    current_user=Depends(require_permission("view:analytics")),
+) -> dict[str, object]:
+    """
+    Update a single platform config key.
+
+    Writable by CFO/Risk Manager/Admin. Sensitive keys remain Admin-only.
+
+    Payload: { "key": "monthly_consumption_bbl", "value": 85000 }
+
+    Allowed keys (from CheckConstraint in models.py):
+      hr_cap, collateral_limit, ifrs9_r2_min, mape_target,
+      var_reduction_target, max_coverage_ratio, pipeline_timeout,
+      monthly_consumption_bbl, instrument_preference, hr_band_min
+
+    Rejects unknown keys with 400.
+    """
+    allowed_keys = {
+        "hr_cap", "collateral_limit", "ifrs9_r2_min", "mape_target",
+        "var_reduction_target", "max_coverage_ratio", "pipeline_timeout",
+        "monthly_consumption_bbl", "instrument_preference", "hr_band_min",
+    }
+    admin_only_keys = {"hr_cap", "collateral_limit", "ifrs9_r2_min"}
+
+    if current_user.role not in (UserRole.CFO, UserRole.RISK_MANAGER, UserRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
+
+    key_obj = payload.get("key")
+    value = payload.get("value")
+    key = key_obj if isinstance(key_obj, str) else None
+
+    if key not in allowed_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown config key '{key}'. Allowed: {sorted(allowed_keys)}"
+        )
+    if value is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'value' is required"
+        )
+    if key in admin_only_keys and current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Key '{key}' requires Admin role",
+        )
+
+    config_repo = ConfigRepository(db)
+    await config_repo.set_value(
+        key=key,
+        value={"value": value},
+        user_id=current_user.id,
+        description=f"Updated via Settings UI by {current_user.email}",
+    )
+    await db.commit()
+
+    logger.info("config_updated", key=key, value=value, user=current_user.email)
+    return {"key": key, "value": value, "status": "updated"}
 
 
 @router.get("/{run_id}", response_model=AnalyticsRunDetail)

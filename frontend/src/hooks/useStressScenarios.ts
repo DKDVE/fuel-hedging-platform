@@ -32,6 +32,16 @@ export interface ScenarioRunResult {
   };
   risk_narrative: string;
   constraints_satisfied: boolean;
+  demand_pnl?: {
+    monthly_consumption_bbl: number;
+    current_price_per_bbl: number;
+    stressed_price_per_bbl: number;
+    hedged_cost_per_bbl: number;
+    unhedged_cost_per_bbl: number;
+    monthly_saving_usd: number;
+    preemptive_70pct_saving_usd: number;
+  };
+  hindsight?: string;
 }
 
 export function useStressScenarios() {

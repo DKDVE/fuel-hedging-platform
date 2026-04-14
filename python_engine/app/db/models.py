@@ -165,7 +165,8 @@ class PlatformConfig(Base):
     __table_args__ = (
         CheckConstraint(
             "key IN ('hr_cap', 'collateral_limit', 'ifrs9_r2_min', 'mape_target', "
-            "'var_reduction_target', 'max_coverage_ratio', 'pipeline_timeout')",
+            "'var_reduction_target', 'max_coverage_ratio', 'pipeline_timeout', "
+            "'monthly_consumption_bbl', 'instrument_preference', 'hr_band_min')",
             name="valid_config_keys",
         ),
     )

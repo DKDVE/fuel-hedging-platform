@@ -432,12 +432,13 @@ class AnalyticsPipeline:
 
         # Get current constraints from config
         config_snapshot = await self.config_repo.get_constraints_snapshot()
+        consumption_bbl = await self.config_repo.get_monthly_consumption()
 
         # Build constraints
         constraints = build_optimizer_constraints(
             config_snapshot,
             cash_reserves=50_000_000,  # TODO: Get from platform config
-            forecast_consumption_bbl=100_000,  # TODO: Calculate from consumption forecast
+            forecast_consumption_bbl=consumption_bbl,
         )
 
         # Calculate VaR curve for optimizer

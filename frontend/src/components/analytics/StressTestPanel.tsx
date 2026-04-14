@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useStressScenarios, type ScenarioRunResult } from '@/hooks/useStressScenarios';
-import { formatMillions, formatPct, formatPrice } from '@/lib/formatters';
+import { formatInt, formatMillions, formatPct, formatPrice } from '@/lib/formatters';
 import { toast } from 'sonner';
 
 function getPrimaryInstrument(instrumentMix: Record<string, number>): string {
@@ -197,6 +197,68 @@ function ScenarioResults({ result }: { result: ScenarioRunResult }) {
           </div>
         )}
       </div>
+
+      {result.demand_pnl && (
+        <div className="bg-gray-800 rounded-lg p-4 mb-4">
+          <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">
+            P&amp;L Impact on Your Monthly Demand
+          </p>
+          <p className="text-xs text-gray-500 mb-3">
+            Based on {formatInt(result.demand_pnl.monthly_consumption_bbl)} bbl/month uplift
+          </p>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-400">Entry price (pre-shock)</span>
+              <span className="text-white font-mono">
+                ${result.demand_pnl.current_price_per_bbl.toFixed(2)}/bbl
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400">Stressed price</span>
+              <span className="text-red-400 font-mono">
+                ${result.demand_pnl.stressed_price_per_bbl.toFixed(2)}/bbl
+              </span>
+            </div>
+            <div className="flex justify-between border-t border-gray-700 pt-2 mt-2">
+              <span className="text-gray-400">Hedged cost per bbl</span>
+              <span className="text-white font-mono">
+                ${result.demand_pnl.hedged_cost_per_bbl.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-300 font-medium">
+                Monthly saving vs. unhedged
+              </span>
+              <span className={`font-bold font-mono ${
+                result.demand_pnl.monthly_saving_usd >= 0 ? 'text-green-400' : 'text-red-400'
+              }`}>
+                {result.demand_pnl.monthly_saving_usd >= 0 ? '+' : ''}
+                {formatMillions(result.demand_pnl.monthly_saving_usd)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-400 text-xs">
+                If pre-hedged at 70% (industry standard)
+              </span>
+              <span className={`text-xs font-mono ${
+                result.demand_pnl.preemptive_70pct_saving_usd >= 0 ? 'text-green-300' : 'text-red-300'
+              }`}>
+                {result.demand_pnl.preemptive_70pct_saving_usd >= 0 ? '+' : ''}
+                {formatMillions(result.demand_pnl.preemptive_70pct_saving_usd)}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {result.hindsight && (
+        <div className="bg-amber-950/30 rounded-lg p-4 border border-amber-800/40 mb-4">
+          <p className="text-xs text-amber-400 uppercase tracking-wide mb-2">
+            Hindsight Analysis - What Should Have Been Done
+          </p>
+          <p className="text-sm text-gray-300 leading-relaxed">{result.hindsight}</p>
+        </div>
+      )}
 
       {/* Narrative */}
       <div className="bg-gray-800 rounded-lg p-4">
