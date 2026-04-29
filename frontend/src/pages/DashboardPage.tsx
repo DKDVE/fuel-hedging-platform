@@ -3,6 +3,9 @@ import { KPICard } from '@/components/dashboard/KPICard';
 import { LivePriceTicker } from '@/components/dashboard/LivePriceTicker';
 import { ForecastChart } from '@/components/dashboard/ForecastChart';
 import { AgentStatusGrid } from '@/components/dashboard/AgentStatusGrid';
+import { HedgeCostSimulator } from '@/components/dashboard/HedgeCostSimulator';
+import { HedgeEffectivenessGauge } from '@/components/dashboard/HedgeEffectivenessGauge';
+import { PeerBenchmarkStrip } from '@/components/dashboard/PeerBenchmarkStrip';
 import { useAnalyticsSummary, useLoadCsv, useTriggerAnalytics } from '@/hooks/useAnalytics';
 import { usePendingRecommendations } from '@/hooks/useRecommendations';
 import { useLatestForecast } from '@/hooks/useForecast';
@@ -12,10 +15,77 @@ import { useAuth } from '@/contexts/AuthContext';
 import apiClient from '@/lib/api';
 import { Link } from 'react-router-dom';
 import { formatInt, formatMillions, formatRatio, formatPct } from '@/lib/formatters';
-import { TrendingDown, Shield, DollarSign, Target, Play, Database, Pencil, Check, X, Fuel } from 'lucide-react';
+import { TrendingDown, Shield, DollarSign, Target, Play, Database, Pencil, Check, X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 const VAR_LIMIT_USD = 5_000_000;
+const INSTRUMENT_KEYS = ['futures', 'options', 'collars', 'swaps'] as const;
+
+interface WhatIfResult {
+  what_if: {
+    hedge_ratio: number;
+    instrument_mix: Record<string, number>;
+    var_usd: number;
+    collateral_usd: number;
+    collateral_pct_of_reserves: number;
+    solver_converged: boolean;
+  };
+  comparison: {
+    original_var_hedged: number;
+    what_if_var: number;
+    var_difference: number;
+    var_better: boolean;
+    collateral_delta_usd: number;
+    monthly_saving_vs_unhedged: number;
+  };
+  verdict: string;
+  narrative?: string;
+  source?: 'n8n_gpt' | 'fallback';
+}
+
+function buildMixFromSelection(instruments: Set<string>): Record<string, number> {
+  const share = 1 / instruments.size;
+  return Object.fromEntries(INSTRUMENT_KEYS.map((k) => [k, instruments.has(k) ? share : 0]));
+}
+
+function getInstrumentNote(instruments: Set<string>): string {
+  const has = (i: string) => instruments.has(i);
+  if (instruments.size === 1) {
+    if (has('futures')) return 'Locks price today. Requires daily margin. Best for near-term.';
+    if (has('options')) return 'Caps max cost. Pay premium upfront. Best when expecting volatility.';
+    if (has('collars')) return 'Zero-cost structure. Caps upside, floors downside.';
+    if (has('swaps')) return 'Monthly average settlement. No exchange margin needed.';
+  }
+  if (has('futures') && has('options') && instruments.size === 2) {
+    return 'Core coverage via futures with spike protection via options.';
+  }
+  if (has('futures') && has('collars') && instruments.size === 2) {
+    return 'Industry standard combination. IAG, Lufthansa pattern.';
+  }
+  if (instruments.size >= 3) {
+    return 'Diversified portfolio approach. Maximises IFRS 9 flexibility.';
+  }
+  return 'Combined instrument strategy.';
+}
+
+function getSeasonalMultiplier(): { multiplier: number; quarter: string; label: string } {
+  const month = new Date().getMonth();
+  const defaults = { q1: 0.85, q2: 0.90, q3: 1.10, q4: 1.15 };
+  let stored = defaults;
+  try {
+    const raw = localStorage.getItem('aerohedge_seasonal');
+    if (raw) {
+      stored = { ...defaults, ...JSON.parse(raw) };
+    }
+  } catch {
+    // use defaults
+  }
+
+  if (month <= 2) return { multiplier: stored.q1, quarter: 'Q1', label: 'Jan–Mar shoulder season' };
+  if (month <= 5) return { multiplier: stored.q2, quarter: 'Q2', label: 'Apr–Jun shoulder season' };
+  if (month <= 8) return { multiplier: stored.q3, quarter: 'Q3', label: 'Jul–Sep summer peak' };
+  return { multiplier: stored.q4, quarter: 'Q4', label: 'Oct–Dec holiday peak' };
+}
 
 export function DashboardPage() {
   const { data: summary, isLoading: summaryLoading } = useAnalyticsSummary();
@@ -33,6 +103,11 @@ export function DashboardPage() {
   const loadCsv = useLoadCsv();
   const [consumption, setConsumption] = useState(100_000);
   const [savedConsumption, setSavedConsumption] = useState(100_000);
+  const [safPct, setSafPct] = useState(0);
+  const [targetHR, setTargetHR] = useState(60);
+  const [selectedInstruments, setSelectedInstruments] = useState<Set<string>>(new Set(['futures']));
+  const [aiResult, setAiResult] = useState<WhatIfResult | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
   const consumptionChanged = consumption !== savedConsumption;
   const userRole = (user?.role as string | undefined)?.toLowerCase();
   const canEditConsumption =
@@ -108,15 +183,43 @@ export function DashboardPage() {
     }
   };
 
-  if (summaryLoading) {
-    return (
-      <div className="p-8">
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-        </div>
-      </div>
-    );
-  }
+  const handleToggleInstrument = (instrument: string) => {
+    if (!canEditConsumption) return;
+    setSelectedInstruments((prev) => {
+      const next = new Set(prev);
+      if (next.has(instrument)) {
+        if (next.size === 1) {
+          toast.error('At least one instrument must remain selected.');
+          return prev;
+        }
+        next.delete(instrument);
+      } else {
+        next.add(instrument);
+      }
+      return next;
+    });
+  };
+
+  const handleGetAiRecommendation = async () => {
+    if (aiLoading) return;
+    setAiResult(null);
+    setAiLoading(true);
+    try {
+      const response = await apiClient.post<WhatIfResult>('/analytics/demand-strategy', {
+        hedge_ratio: targetHR / 100,
+        consumption_bbl: consumption,
+        instruments: Array.from(selectedInstruments),
+        instrument_mix: buildMixFromSelection(selectedInstruments),
+        original_var_hedged: summary?.current_var_usd ?? 0,
+        original_var_unhedged: (summary?.current_var_usd ?? 0) * 1.42,
+      });
+      setAiResult(response.data);
+    } catch {
+      toast.error('Failed to get AI recommendation.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   // KPI values from summary (use formatters to avoid NaN/Infinity display)
   const varValue = summary?.current_var_usd ?? null;
@@ -128,6 +231,27 @@ export function DashboardPage() {
   const hrNum = typeof hedgeRatio === 'number' ? hedgeRatio : 0;
   const collNum = typeof collateralPct === 'number' ? collateralPct : 0;
   const mapeNum = typeof mapeValue === 'number' ? mapeValue : 0;
+  const hedgeableBbl = Math.round(consumption * (1 - safPct / 100));
+  const safBbl = consumption - hedgeableBbl;
+  const hedgedBbl = Math.round(hedgeableBbl * (targetHR / 100));
+  const unhedgedBbl = hedgeableBbl - hedgedBbl;
+  const latestPrice = prices.length > 0 ? prices[prices.length - 1] : null;
+  const currentPrice = latestPrice?.jet_fuel_spot ?? 9.52;
+  const monthlyCostImpact = currentPrice * 42 * unhedgedBbl;
+
+  useEffect(() => {
+    if (hrNum > 0) setTargetHR(Math.round(hrNum * 100));
+  }, [hrNum]);
+
+  if (summaryLoading) {
+    return (
+      <div className="p-8">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
@@ -259,21 +383,23 @@ export function DashboardPage() {
             glowColor="from-green-600"
           />
         </div>
+
+        <div className="col-span-2 md:col-span-4">
+          <HedgeEffectivenessGauge />
+        </div>
       </div>
 
+      <PeerBenchmarkStrip ourHR={hrNum} />
+
       <div className="card">
-        {/* Header row */}
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Fuel className="h-5 w-5 text-blue-400" />
-            <div>
-              <h3 className="text-sm font-semibold text-white uppercase tracking-wide">
-                Demand & Coverage
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Monthly fuel uplift vs. hedged position
-              </p>
-            </div>
+          <div>
+            <h3 className="text-sm font-semibold text-white uppercase tracking-wide">
+              Hedge Strategy Builder
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Configure target ratio and instrument mix with live impact estimates
+            </p>
           </div>
           {consumptionChanged && canEditConsumption && (
             <div className="flex items-center gap-2">
@@ -296,99 +422,280 @@ export function DashboardPage() {
           )}
         </div>
 
-        {/* Three KPI columns */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-          {/* Monthly Uplift */}
-          <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
-            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">
-              Monthly Uplift
-            </p>
-            <p className="text-2xl font-bold text-white">
-              {formatInt(consumption)}
-              <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
-            </p>
-            {canEditConsumption && (
-              <p className="text-xs text-blue-400 mt-1 flex items-center gap-1">
-                <Pencil className="h-3 w-3" />
-                Adjust below
+        <div className="border-t border-slate-700 pt-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">Adjust monthly uplift forecast</p>
+            <span className="text-xs font-mono text-blue-300">{formatInt(consumption)} bbl</span>
+          </div>
+          <input
+            type="range"
+            min={10_000}
+            max={500_000}
+            step={5_000}
+            value={consumption}
+            onChange={(e) => canEditConsumption && setConsumption(Number(e.target.value))}
+            disabled={!canEditConsumption}
+            className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-blue-500 disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+          <div className="flex justify-between text-xs text-slate-600 mt-1">
+            <span>10k</span>
+            <span>250k</span>
+            <span>500k</span>
+          </div>
+
+          {(() => {
+            const s = getSeasonalMultiplier();
+            const adjustedBbl = Math.round(consumption * s.multiplier);
+            const diff = adjustedBbl - consumption;
+            return (
+              <div className="rounded-lg bg-slate-800/40 border border-slate-700 p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-slate-300 font-medium">
+                      🗓 Seasonal Adjustment — {s.quarter} ({s.label})
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Seasonal multiplier: {(s.multiplier * 100).toFixed(0)}% of base
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-mono font-bold text-white">
+                      {adjustedBbl.toLocaleString()} bbl
+                    </p>
+                    <p
+                      className={`text-xs font-mono ${
+                        diff > 0 ? 'text-amber-400' : diff < 0 ? 'text-blue-400' : 'text-slate-400'
+                      }`}
+                    >
+                      {diff > 0 ? '+' : ''}{diff.toLocaleString()} vs base
+                    </p>
+                  </div>
+                </div>
+                {Math.abs(diff) > 5_000 && (
+                  <p className="text-xs text-slate-500 mt-2 border-t border-slate-700 pt-2">
+                    Consider adjusting your hedge volume to {adjustedBbl.toLocaleString()} bbl
+                    to align with seasonal demand. Update base uplift in Settings.
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+
+          {canEditConsumption && (
+            <div className="flex items-center justify-between py-2 border-t border-slate-700">
+              <div>
+                <p className="text-xs text-slate-300 font-medium">SAF Component</p>
+                <p className="text-xs text-slate-500">
+                  SAF volumes are not hedgeable via standard instruments
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={0}
+                  max={30}
+                  step={5}
+                  value={safPct}
+                  onChange={(e) => setSafPct(Number(e.target.value))}
+                  className="w-24 h-2 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-green-500"
+                />
+                <span className="text-xs font-mono text-green-400 w-8">{safPct}%</span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between pt-2 border-t border-slate-700">
+            <div>
+              <p className="text-xs text-slate-300 font-medium">Target Hedge Ratio</p>
+              <p className="text-xs text-slate-500 mt-0.5">(System recommends: {formatRatio(hedgeRatio)})</p>
+            </div>
+            <span className="text-xs font-mono text-blue-300">{targetHR}%</span>
+          </div>
+          <input
+            type="range"
+            min={30}
+            max={80}
+            step={1}
+            value={targetHR}
+            onChange={(e) => canEditConsumption && setTargetHR(Number(e.target.value))}
+            disabled={!canEditConsumption}
+            className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-blue-500 disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+        </div>
+
+        <div className="border-t border-slate-700 pt-4">
+          <p className="text-xs text-slate-300 font-medium mb-2">Instrument Selection</p>
+          <div className="flex flex-wrap gap-2">
+            {INSTRUMENT_KEYS.map((instrument) => {
+              const active = selectedInstruments.has(instrument);
+              const label = instrument.charAt(0).toUpperCase() + instrument.slice(1);
+              return (
+                <button
+                  key={instrument}
+                  type="button"
+                  disabled={!canEditConsumption}
+                  onClick={() => handleToggleInstrument(instrument)}
+                  className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
+                    active
+                      ? 'border-blue-500 bg-blue-950 text-blue-300'
+                      : 'border-slate-600 bg-slate-900 text-slate-400 hover:border-slate-400'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">{getInstrumentNote(selectedInstruments)}</p>
+          {safPct > 0 && (
+            <span className="inline-block text-xs bg-green-900/40 text-green-400 border border-green-800/40 rounded-full px-2 py-0.5 mt-2">
+              🌿 {safPct}% SAF — not hedged via derivatives
+            </span>
+          )}
+        </div>
+
+        <div className="border-t border-slate-700 pt-4 mt-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+              <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Monthly Uplift</p>
+              <p className="text-2xl font-bold text-white">
+                {formatInt(consumption)}
+                <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
+              </p>
+              {canEditConsumption && (
+                <p className="text-xs text-blue-400 mt-1 flex items-center gap-1">
+                  <Pencil className="h-3 w-3" />
+                  Adjust above
+                </p>
+              )}
+            </div>
+            <div className="bg-green-950/30 rounded-xl p-4 border border-green-800/40">
+              <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Hedgeable Volume</p>
+              <p className="text-2xl font-bold text-green-400">
+                {formatInt(hedgeableBbl)}
+                <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
+              </p>
+              <p className="text-xs text-green-600 mt-1">{safPct > 0 ? `(excl. ${formatInt(safBbl)} bbl SAF)` : ''}</p>
+            </div>
+            <div className="bg-blue-950/20 rounded-xl p-4 border border-blue-800/30">
+              <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Hedged Volume</p>
+              <p className="text-2xl font-bold text-blue-300">
+                {formatInt(hedgedBbl)}
+                <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
+              </p>
+              <p className="text-xs text-blue-500 mt-1">{targetHR}% of hedgeable volume</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+            <div className="bg-amber-950/20 rounded-xl p-4 border border-amber-800/30">
+              <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Unhedged Volume</p>
+              <p className="text-2xl font-bold text-amber-400">
+                {formatInt(unhedgedBbl)}
+                <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
+              </p>
+              <p className="text-xs text-amber-600 mt-1">(remaining)</p>
+            </div>
+            <div className="bg-red-950/20 rounded-xl p-4 border border-red-800/30">
+              <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">Monthly Cost Impact</p>
+              <p className="text-2xl font-bold text-red-300">{formatMillions(monthlyCostImpact)}/month</p>
+              <p className="text-xs text-red-500 mt-1">Unhedged exposure/month at current price</p>
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+              <span>0 bbl</span>
+              <span className="text-slate-300 font-medium">{targetHR}% target hedged</span>
+              <span>{formatInt(hedgeableBbl)} bbl</span>
+            </div>
+            <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-green-600 to-green-400 rounded-full transition-all duration-300"
+                style={{ width: `${Math.min(targetHR, 100)}%` }}
+              />
+            </div>
+            {targetHR !== Math.round(hrNum * 100) && (
+              <p className="text-xs text-amber-400 mt-1">
+                ⚠ Your target ({targetHR}%) differs from system recommendation ({formatRatio(hedgeRatio)})
               </p>
             )}
           </div>
 
-          {/* Hedged Volume */}
-          <div className="bg-green-950/30 rounded-xl p-4 border border-green-800/40">
-            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">
-              Hedged Volume
-            </p>
-            <p className="text-2xl font-bold text-green-400">
-              {formatInt(Math.round(consumption * hrNum))}
-              <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
-            </p>
-            <p className="text-xs text-green-600 mt-1">
-              {formatRatio(hedgeRatio)} of uplift
-            </p>
-          </div>
-
-          {/* Unhedged Volume */}
-          <div className="bg-amber-950/20 rounded-xl p-4 border border-amber-800/30">
-            <p className="text-xs text-slate-400 uppercase tracking-wide mb-1">
-              Unhedged Volume
-            </p>
-            <p className="text-2xl font-bold text-amber-400">
-              {formatInt(Math.round(consumption * (1 - hrNum)))}
-              <span className="text-sm font-normal text-slate-400 ml-1">bbl</span>
-            </p>
-            <p className="text-xs text-amber-600 mt-1">
-              {formatRatio(typeof hedgeRatio === 'number' ? 1 - hrNum : null)} exposed
-            </p>
-          </div>
-        </div>
-
-        {/* Coverage bar */}
-        <div className="mb-5">
-          <div className="flex justify-between text-xs text-slate-500 mb-1.5">
-            <span>0 bbl</span>
-            <span className="text-slate-300 font-medium">
-              {formatRatio(hedgeRatio)} hedged
-            </span>
-            <span>{formatInt(consumption)} bbl</span>
-          </div>
-          <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-green-600 to-green-400 rounded-full transition-all duration-300"
-              style={{ width: `${Math.min(hrNum * 100, 100)}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Slider — CFO/Risk Manager/Admin only */}
-        {canEditConsumption && (
-          <div className="border-t border-slate-700 pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-slate-400">
-                Adjust monthly uplift forecast
+          {targetHR > 65 && (
+            <div className={`rounded-lg p-3 border mt-3 ${targetHR >= 75 ? 'bg-red-950/30 border-red-800/50' : 'bg-amber-950/20 border-amber-800/30'}`}>
+              <p className={`text-xs font-semibold mb-1 ${targetHR >= 75 ? 'text-red-400' : 'text-amber-400'}`}>
+                {targetHR >= 75 ? '⚠ Over-Hedge Risk' : '◈ Approaching Optimal Ceiling'}
               </p>
-              <span className="text-xs font-mono text-blue-300">
-                {formatInt(consumption)} bbl
-              </span>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                {targetHR >= 75
+                  ? `At ${targetHR}% hedge ratio, if actual fuel demand falls 20% below forecast, you may be over-hedged by ~${formatInt(Math.round(consumption * (targetHR / 100) * 0.2))} bbl — creating mark-to-market losses. Southwest Airlines faced this in 2020 (COVID demand collapse).`
+                  : `At ${targetHR}%, you are approaching the 70% inflection point where marginal VaR reduction drops below 2% per 10% HR increase (H1 validated). Additional collateral cost may outweigh the incremental hedge benefit.`}
+              </p>
             </div>
-            <input
-              type="range"
-              min={10_000}
-              max={500_000}
-              step={5_000}
-              value={consumption}
-              onChange={(e) => setConsumption(Number(e.target.value))}
-              className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-slate-700 accent-blue-500"
-            />
-            <div className="flex justify-between text-xs text-slate-600 mt-1">
-              <span>10k</span>
-              <span>250k</span>
-              <span>500k</span>
+          )}
+        </div>
+
+        {canEditConsumption && (
+          <button
+            type="button"
+            onClick={handleGetAiRecommendation}
+            disabled={aiLoading}
+            className="w-full mt-4 inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            <Sparkles className="h-4 w-4" />
+            {aiLoading ? 'Analyzing...' : 'Get AI Recommendation'}
+          </button>
+        )}
+
+        {aiResult && (
+          <div className="mt-4 rounded-xl border border-blue-800/50 bg-blue-950/20 p-4">
+            <p className="text-xs text-blue-400 uppercase tracking-wide mb-3">AI Strategy Analysis</p>
+            <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+              <div>
+                <p className="text-slate-400 text-xs">Your Strategy VaR</p>
+                <p className="text-white font-bold font-mono">{formatMillions(aiResult.what_if.var_usd)}</p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">vs. System Recommendation</p>
+                <p className={`font-bold font-mono ${aiResult.comparison.var_better ? 'text-green-400' : 'text-amber-400'}`}>
+                  {aiResult.comparison.var_better ? '▼ Lower risk' : '▲ Higher risk'} by{' '}
+                  {formatMillions(Math.abs(aiResult.comparison.var_difference))}
+                </p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">Collateral Required</p>
+                <p className="text-white font-mono text-sm">
+                  {formatMillions(aiResult.what_if.collateral_usd)} ({formatPct(aiResult.what_if.collateral_pct_of_reserves, 1)} of reserves)
+                </p>
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs">Monthly saving vs. unhedged</p>
+                <p className="text-green-400 font-mono text-sm">
+                  {formatMillions(aiResult.comparison.monthly_saving_vs_unhedged)}
+                </p>
+              </div>
             </div>
+            <p className="text-sm text-slate-300 leading-relaxed border-t border-slate-700 pt-3">{aiResult.verdict}</p>
+            {aiResult.source && (
+              <p className="text-xs text-slate-600 mt-2 text-right">
+                {aiResult.source === 'n8n_gpt'
+                  ? '✦ Generated by GPT-4o-mini via n8n'
+                  : '○ Fallback template (n8n unavailable)'}
+              </p>
+            )}
           </div>
         )}
       </div>
+
+      {canEditConsumption && (
+        <HedgeCostSimulator
+          currentPrice={currentPrice}
+          consumption={consumption}
+          hedgeRatioPct={targetHR}
+          selectedInstruments={selectedInstruments}
+        />
+      )}
  
       {/* Forecast Chart */}
       <ForecastChart

@@ -183,6 +183,8 @@ class RecommendationService:
         approver_id: UUID,
         ip_address: str,
         comments: str | None = None,
+        custom_hedge_ratio: float | None = None,
+        custom_instrument_mix: dict | None = None,
     ) -> HedgeRecommendationResponse:
         """Approve a recommendation.
         
@@ -206,13 +208,35 @@ class RecommendationService:
         # Calculate response time
         response_lag_minutes = self._calculate_response_lag(recommendation.created_at)
 
+        # Build full audit comment
+        full_comment = comments or ""
+        if custom_hedge_ratio is not None:
+            full_comment = (
+                f"[Custom HR: {custom_hedge_ratio:.1%}] " + full_comment
+            ).strip()
+        if custom_instrument_mix is not None:
+            mix_str = ", ".join(
+                f"{k}={v:.0%}" for k, v in custom_instrument_mix.items() if v > 0
+            )
+            full_comment = (
+                f"[Custom mix: {mix_str}] " + full_comment
+            ).strip()
+
+        # Persist CFO overrides to recommendation so downstream position creation
+        # uses the approved strategy even when positions are created later.
+        if custom_hedge_ratio is not None:
+            recommendation.optimal_hr = Decimal(str(custom_hedge_ratio))
+        if custom_instrument_mix is not None:
+            recommendation.instrument_mix = custom_instrument_mix
+        await self.repo.session.flush()
+
         # Record approval
         await self.repo.add_approval(
             recommendation_id=recommendation_id,
             approver_id=approver_id,
             decision=DecisionType.APPROVE,
             response_lag_minutes=response_lag_minutes,
-            override_reason=comments,
+            override_reason=full_comment or None,
             ip_address=ip_address,
         )
 

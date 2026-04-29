@@ -308,9 +308,19 @@ class UpdateRecommendationRequest(BaseModel):
 class ApproveRequest(BaseModel):
     """Payload for POST /recommendations/:id/approve."""
 
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra='ignore')  # ignore unknown fields gracefully
 
     comments: str | None = Field(None, max_length=1000)
+    custom_hedge_ratio: float | None = Field(
+        None,
+        ge=0.0,
+        le=0.80,
+        description="CFO override hedge ratio. If provided, creates position at this HR.",
+    )
+    custom_instrument_mix: dict[str, float] | None = Field(
+        None,
+        description="CFO override instrument mix. Keys: futures, options, collars, swaps.",
+    )
 
 
 class RejectRequest(BaseModel):

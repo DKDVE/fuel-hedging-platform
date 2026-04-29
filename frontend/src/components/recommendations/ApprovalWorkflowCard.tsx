@@ -16,9 +16,9 @@ import { useAuth } from '@/contexts/AuthContext';
 
 interface ApprovalWorkflowCardProps {
   recommendation: HedgeRecommendationResponse;
-  onApprove?: (comments?: string) => void;
+  onApprove?: (comments?: string, customHR?: number, customMix?: Record<string, number>) => void;
   onReject?: (reason: string) => void;
-  onDefer?: (reason: string) => void;
+  onDefer?: (reason: string, deferUntil?: string) => void;
   canApprove: boolean;
   isSubmitting?: boolean;
 }
@@ -851,9 +851,18 @@ export function ApprovalWorkflowCard({
 
               <button
                 type="button"
-                onClick={() => onApprove?.(
-                  `[Custom strategy: HR=${whatIfHR}%, Futures=${whatIfMix.futures}%, Options=${whatIfMix.options}%, Collars=${whatIfMix.collars}%, Swaps=${whatIfMix.swaps}%]`
-                )}
+                onClick={() => {
+                  const mix = {
+                    futures: whatIfMix.futures / 100,
+                    options: whatIfMix.options / 100,
+                    collars: whatIfMix.collars / 100,
+                    swaps: whatIfMix.swaps / 100,
+                  };
+                  const comment = `Custom strategy approved: HR=${whatIfHR}%, ` +
+                    `Futures=${whatIfMix.futures}%, Options=${whatIfMix.options}%, ` +
+                    `Collars=${whatIfMix.collars}%, Swaps=${whatIfMix.swaps}%`;
+                  onApprove?.(comment, whatIfHR / 100, mix);
+                }}
                 disabled={isSubmitting}
                 className="mt-4 w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
               >

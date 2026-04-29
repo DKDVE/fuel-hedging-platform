@@ -147,3 +147,8 @@ class ConfigRepository(BaseRepository[PlatformConfig]):
         """Get monthly fuel consumption in barrels. Falls back to 100,000."""
         value = await self.get_value("monthly_consumption_bbl")
         return float(value.get("value", 100_000)) if value else 100_000
+
+    async def get_instrument_preference(self) -> str:
+        """Get CFO instrument preference. Falls back to 'optimiser_decides'."""
+        value = await self.get_value("instrument_preference")
+        return str(value.get("value", "optimiser_decides")) if value else "optimiser_decides"

@@ -302,10 +302,10 @@ class Approval(Base):
 
     __tablename__ = "approvals"
 
-    recommendation_id: Mapped[uuid.UUID] = mapped_column(
+    recommendation_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("hedge_recommendations.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("hedge_recommendations.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     approver_id: Mapped[uuid.UUID] = mapped_column(

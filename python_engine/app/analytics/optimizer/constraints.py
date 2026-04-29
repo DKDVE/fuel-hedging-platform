@@ -70,6 +70,51 @@ def build_optimizer_constraints(
     return constraints
 
 
+def apply_instrument_preference(
+    constraints: dict,
+    preference: str,
+) -> dict:
+    """
+    Adjust instrument bounds based on CFO's stated preference.
+
+    Preference values:
+      'optimiser_decides' — no change, pure VaR minimisation
+      'favour_futures'    — raise futures_min to 0.50, lower options_max to 0.25
+      'favour_options'    — raise options_max to 0.60, lower futures_max to 0.70
+      'favour_collars'    — raise collars_max to 0.50, lower swaps_max to 0.10
+      'favour_swaps'      — raise swaps_max to 0.40, lower collars_max to 0.15
+
+    Does NOT override hard regulatory limits (hr_max, collateral_limit).
+    Returns a new constraints dict — does not mutate the original.
+    """
+    c = dict(constraints)  # shallow copy — do not mutate original
+
+    if preference == "favour_futures":
+        c["futures_min"] = 0.50   # at least 50% in futures
+        c["options_max"] = 0.25   # cap options at 25%
+        c["collars_max"] = 0.20
+        c["swaps_max"] = 0.15
+
+    elif preference == "favour_options":
+        c["options_max"] = 0.60   # allow up to 60% in options
+        c["futures_max"] = 0.70   # cap futures at 70%
+        c["futures_min"] = 0.20   # but ensure some futures for liquidity
+        c["swaps_max"] = 0.15
+
+    elif preference == "favour_collars":
+        c["collars_max"] = 0.50   # allow up to 50% in collars
+        c["swaps_max"] = 0.10
+        c["futures_min"] = 0.30   # maintain futures base
+
+    elif preference == "favour_swaps":
+        c["swaps_max"] = 0.40   # allow up to 40% in swaps
+        c["collars_max"] = 0.15
+        c["futures_min"] = 0.30
+
+    # 'optimiser_decides' — return unchanged
+    return c
+
+
 def validate_solution_constraints(
     hedge_ratio: float,
     instrument_mix: dict[str, float],

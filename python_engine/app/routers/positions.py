@@ -3,15 +3,16 @@
 Provides access to hedge positions from approved recommendations.
 """
 
+from datetime import date as date_type
 from decimal import Decimal
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.dependencies import AnalystUser, DatabaseSession
+from app.dependencies import AnalystUser, DatabaseSession, require_permission
 from app.repositories import PositionRepository
 from app.repositories.market_data import MarketDataRepository
-from app.db.models import HedgePosition, PositionStatus
+from app.db.models import HedgePosition, InstrumentType, PositionStatus
 from app.services.price_service import get_price_service
 
 router = APIRouter()
@@ -149,4 +150,57 @@ async def list_positions(
             "total_cash_savings_usd": round(total_savings, 2),
             "avg_pnl_pct": round(avg_pnl_pct, 4),
         },
+    }
+
+
+@router.post("", response_model=dict, status_code=201)
+async def create_position(
+    payload: dict,
+    db: DatabaseSession,
+    current_user=Depends(require_permission("approve:recommendation")),
+) -> dict:
+    """
+    Manually record a new hedge position.
+    Requires Risk Manager or above (approve:recommendation permission).
+    """
+    allowed_instruments = {i.value for i in InstrumentType}
+    instrument_raw = str(payload.get("instrument_type", "")).upper()
+    if instrument_raw not in allowed_instruments:
+        raise HTTPException(
+            status_code=400,
+            detail=f"instrument_type must be one of {sorted(allowed_instruments)}",
+        )
+
+    try:
+        expiry = date_type.fromisoformat(str(payload.get("expiry_date", "")))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="expiry_date must be ISO format YYYY-MM-DD"
+        ) from exc
+
+    hr = float(payload.get("hedge_ratio", 0))
+    if not (0 < hr <= 1.0):
+        raise HTTPException(status_code=400, detail="hedge_ratio must be between 0 and 1")
+
+    position = HedgePosition(
+        recommendation_id=None,   # manually created — no linked recommendation
+        instrument_type=InstrumentType(instrument_raw),
+        proxy=str(payload.get("proxy", "heating_oil")),
+        notional_usd=Decimal(str(payload.get("notional_usd", 0))),
+        hedge_ratio=Decimal(str(hr)),
+        entry_price=Decimal(str(payload.get("entry_price", 0))),
+        expiry_date=expiry,
+        collateral_usd=Decimal(str(payload.get("collateral_usd", 0))),
+        ifrs9_r2=Decimal(str(payload.get("ifrs9_r2", 0.8517))),
+        status=PositionStatus.OPEN,
+    )
+    db.add(position)
+    await db.commit()
+    await db.refresh(position)
+
+    return {
+        "id": str(position.id),
+        "instrument_type": position.instrument_type.value,
+        "status": position.status.value,
+        "message": "Position created successfully",
     }

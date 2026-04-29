@@ -3,10 +3,18 @@ import apiClient from '@/lib/api';
 import type {
   HedgeRecommendationWithDetailsResponse,
   PaginatedHedgeRecommendationsResponse,
-  RecommendationApproveRequest,
   RecommendationRejectRequest,
   RecommendationDeferRequest,
 } from '@/types/api';
+
+interface ApprovePayload {
+  id: string;
+  data: {
+    comments?: string;
+    custom_hedge_ratio?: number;
+    custom_instrument_mix?: Record<string, number>;
+  };
+}
 
 export function useRecommendations(page: number = 1, limit: number = 10) {
   return useQuery<PaginatedHedgeRecommendationsResponse>({
@@ -50,10 +58,7 @@ export function useApproveRecommendation() {
     mutationFn: async ({
       id,
       data,
-    }: {
-      id: string;
-      data: RecommendationApproveRequest;
-    }) => {
+    }: ApprovePayload) => {
       const response = await apiClient.post(
         `/recommendations/${id}/approve`,
         data

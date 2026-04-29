@@ -133,6 +133,8 @@ async def approve_recommendation(
             approver_id=user.id,
             ip_address=request.client.host if request.client else "unknown",
             comments=payload.comments,
+            custom_hedge_ratio=payload.custom_hedge_ratio,
+            custom_instrument_mix=payload.custom_instrument_mix,
         )
         await session.commit()
         return result

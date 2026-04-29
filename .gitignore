@@ -81,3 +81,6 @@ logs/
 *.tmp
 *.bak
 .temp/
+
+n8n/workflows/Ai Hedge Fund viral copy.json
+n8n/workflows/fuel_hedging_workflow_generated.json

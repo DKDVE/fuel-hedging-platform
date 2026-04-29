@@ -93,11 +93,20 @@ export function RecommendationsPage() {
     },
   ];
 
-  const handleApprove = async (id: string, comments?: string) => {
+  const handleApprove = async (
+    id: string,
+    comments?: string,
+    customHR?: number,
+    customMix?: Record<string, number>,
+  ) => {
     try {
       await approveMutation.mutateAsync({
         id,
-        data: { comments: comments || undefined },
+        data: {
+          comments: comments || undefined,
+          custom_hedge_ratio: customHR,
+          custom_instrument_mix: customMix,
+        },
       });
     } catch (error) {
       console.error('Approve failed:', error);
@@ -195,7 +204,9 @@ export function RecommendationsPage() {
               {/* Approval Workflow Card */}
               <ApprovalWorkflowCard
                 recommendation={rec}
-                onApprove={(comments) => handleApprove(rec.id, comments)}
+                onApprove={(comments, customHR, customMix) =>
+                  handleApprove(rec.id, comments, customHR, customMix)
+                }
                 onReject={(reason) => handleReject(rec.id, reason)}
                 onDefer={(reason) => handleDefer(rec.id, reason)}
                 canApprove={canApprove}

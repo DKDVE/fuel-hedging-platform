@@ -72,17 +72,33 @@ class HedgeOptimizer:
             return var_at_hr
 
         # Decision variables bounds
-        hr_max = constraints["hr_max"]
+        hr_min = float(constraints.get("hr_min", 0.0))
+        hr_max = float(constraints["hr_max"])
         bounds = [
-            (0.0, hr_max),  # hedge_ratio
-            (0.0, 1.0),  # pct_futures
-            (0.0, constraints.get("options_max", 0.50)),  # pct_options
-            (0.0, constraints.get("collars_max", 0.30)),  # pct_collars
-            (0.0, constraints.get("swaps_max", 0.20)),   # pct_swaps
-            (0.0, 1.0),  # w_heating_oil
-            (0.0, 1.0),  # w_brent
-            (0.0, 1.0),  # w_wti
+            (hr_min, hr_max),  # hedge_ratio
+            (float(constraints.get("futures_min", 0.0)), float(constraints.get("futures_max", 1.0))),  # pct_futures
+            (float(constraints.get("options_min", 0.0)), float(constraints.get("options_max", 0.50))),  # pct_options
+            (float(constraints.get("collars_min", 0.0)), float(constraints.get("collars_max", 0.30))),  # pct_collars
+            (float(constraints.get("swaps_min", 0.0)), float(constraints.get("swaps_max", 0.20))),   # pct_swaps
+            (float(constraints.get("heating_oil_min", 0.0)), float(constraints.get("heating_oil_max", 1.0))),  # w_heating_oil
+            (float(constraints.get("brent_min", 0.0)), float(constraints.get("brent_max", 1.0))),  # w_brent
+            (float(constraints.get("wti_min", 0.0)), float(constraints.get("wti_max", 1.0))),  # w_wti
         ]
+
+        # Keep initial guess inside bounds to avoid immediate solver failures.
+        x0_raw = np.array([0.60, 0.70, 0.20, 0.10, 0.0, 0.70, 0.20, 0.10], dtype=float)
+        x0 = np.array(
+            [min(max(v, lo), hi) for v, (lo, hi) in zip(x0_raw, bounds)],
+            dtype=float,
+        )
+
+        # Re-normalize instrument and proxy weights after clipping.
+        instr_sum = x0[1] + x0[2] + x0[3] + x0[4]
+        if instr_sum > 0:
+            x0[1:5] = x0[1:5] / instr_sum
+        proxy_sum = x0[5] + x0[6] + x0[7]
+        if proxy_sum > 0:
+            x0[5:8] = x0[5:8] / proxy_sum
 
         # Constraint functions
         def constraint_instrument_sum(x: np.ndarray) -> float:
@@ -97,9 +113,6 @@ class HedgeOptimizer:
             {"type": "eq", "fun": constraint_instrument_sum},
             {"type": "eq", "fun": constraint_proxy_sum},
         ]
-
-        # Initial guess (start at 60% HR, futures-heavy, heating oil primary)
-        x0 = np.array([0.60, 0.70, 0.20, 0.10, 0.0, 0.70, 0.20, 0.10])
 
         # Run optimization
         try:

@@ -65,6 +65,13 @@ export function SettingsPage() {
 
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [seasonal, setSeasonal] = useState({
+    q1: 0.85,
+    q2: 0.90,
+    q3: 1.10,
+    q4: 1.15,
+  });
+  const [seasonalSaved, setSeasonalSaved] = useState(false);
 
   // Mock API health data
   const apiHealth: APIHealthStatus[] = [
@@ -168,6 +175,17 @@ export function SettingsPage() {
     void loadConfig();
   }, []);
 
+  useEffect(() => {
+    const stored = localStorage.getItem('aerohedge_seasonal');
+    if (stored) {
+      try {
+        setSeasonal(JSON.parse(stored));
+      } catch {
+        // ignore invalid local cache
+      }
+    }
+  }, []);
+
   const handleSave = async () => {
     if (!canEdit) return;
     setIsSaving(true);
@@ -184,6 +202,9 @@ export function SettingsPage() {
         await apiClient.patch('/analytics/config', payload);
       }
 
+      localStorage.setItem('aerohedge_seasonal', JSON.stringify(seasonal));
+      setSeasonalSaved(true);
+      setTimeout(() => setSeasonalSaved(false), 2000);
       setInitialConstraints(constraints);
       setIsDirty(false);
       toast.success('Settings saved');
@@ -507,6 +528,80 @@ export function SettingsPage() {
             <RefreshCw className="h-4 w-4" />
             Reset
           </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-lg font-semibold text-white">
+            Seasonal Demand Profile
+          </h3>
+          {seasonalSaved && (
+            <span className="text-xs text-green-400">Saved</span>
+          )}
+        </div>
+        <p className="text-sm text-slate-400 mb-4">
+          Quarterly uplift multipliers relative to base monthly consumption.
+          Peak summer and holiday quarters typically consume more fuel.
+        </p>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {(
+            [
+              { key: 'q1', label: 'Q1 (Jan–Mar)', color: 'bg-blue-600' },
+              { key: 'q2', label: 'Q2 (Apr–Jun)', color: 'bg-teal-600' },
+              { key: 'q3', label: 'Q3 (Jul–Sep)', color: 'bg-amber-600' },
+              { key: 'q4', label: 'Q4 (Oct–Dec)', color: 'bg-purple-600' },
+            ] as const
+          ).map((q) => (
+            <div key={q.key} className="bg-slate-800 rounded-xl p-4 border border-slate-700">
+              <p className="text-xs text-slate-400 mb-2">{q.label}</p>
+              <div className="flex items-center gap-2 mb-3">
+                <span
+                  className={`text-2xl font-bold ${
+                    seasonal[q.key] > 1 ? 'text-amber-400'
+                      : seasonal[q.key] < 1 ? 'text-blue-400' : 'text-white'
+                  }`}
+                >
+                  {(seasonal[q.key] * 100).toFixed(0)}%
+                </span>
+                <span className="text-xs text-slate-500">of base</span>
+              </div>
+              <input
+                type="range"
+                min={50}
+                max={150}
+                step={5}
+                value={Math.round(seasonal[q.key] * 100)}
+                onChange={(e) => setSeasonal((prev) => ({
+                  ...prev,
+                  [q.key]: Number(e.target.value) / 100,
+                }))}
+                className="w-full h-2 rounded-lg appearance-none cursor-pointer
+                           bg-slate-700 accent-blue-500"
+              />
+              <div className="flex justify-between text-xs text-slate-600 mt-1">
+                <span>50%</span><span>100%</span><span>150%</span>
+              </div>
+              <div className="mt-2 h-2 bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full ${q.color}`}
+                  style={{ width: `${Math.min((seasonal[q.key] / 1.5) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 rounded-lg bg-slate-800/60 border border-slate-700 p-3">
+          <p className="text-xs text-slate-400">
+            Example: Base uplift 100,000 bbl/month × Q4 multiplier (
+            {(seasonal.q4 * 100).toFixed(0)}%) ={' '}
+            <span className="text-white font-mono">
+              {Math.round(100_000 * seasonal.q4).toLocaleString()} bbl/month
+            </span>{' '}
+            estimated December requirement.
+          </p>
         </div>
       </div>
 

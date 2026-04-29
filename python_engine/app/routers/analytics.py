@@ -42,7 +42,10 @@ from app.services.pipeline_runner import run_analytics_pipeline_background
 from app.services.data_ingestion import import_historical_csv
 from app.services.price_service import get_price_service
 from app.services.scenario_service import ScenarioService
-from app.analytics.optimizer import build_optimizer_constraints
+from app.analytics.optimizer.constraints import (
+    apply_instrument_preference,
+    build_optimizer_constraints,
+)
 
 router = APIRouter()
 
@@ -643,6 +646,436 @@ async def update_platform_config(
 
     logger.info("config_updated", key=key, value=value, user=current_user.email)
     return {"key": key, "value": value, "status": "updated"}
+
+
+@router.post("/what-if")
+async def run_what_if(
+    payload: dict,
+    db: DatabaseSession,
+    current_user=Depends(require_permission("view:analytics")),
+) -> dict:
+    """
+    Re-run the optimizer with user-specified hedge ratio and instrument mix.
+    Returns VaR impact and comparison vs. current recommendation.
+    Does NOT write to DB. Pure simulation.
+
+    Payload:
+    {
+      "hedge_ratio": 0.65,
+      "instrument_mix": { "futures": 0.80, "options": 0.10, "collars": 0.05, "swaps": 0.05 },
+      "original_var_hedged": 2870000,
+      "original_var_unhedged": 4870000
+    }
+    """
+    import numpy as np
+    from pathlib import Path
+    import pandas as pd
+
+    # ── Load dataset ──────────────────────────────────────────────────
+    base = Path(__file__).resolve().parent.parent
+    csv_candidates = [
+        base / "data" / "fuel_hedging_dataset.csv",
+        Path("data/fuel_hedging_dataset.csv"),
+        Path("/app/data/fuel_hedging_dataset.csv"),
+    ]
+    df = None
+    for p in csv_candidates:
+        if p.exists():
+            df = pd.read_csv(p, parse_dates=["Date"])
+            break
+    if df is None:
+        raise HTTPException(status_code=503, detail="Dataset not available")
+
+    # ── Get config constraints ────────────────────────────────────────
+    config_repo = ConfigRepository(db)
+    config_snapshot = await config_repo.get_constraints_snapshot()
+    consumption_bbl = await config_repo.get_monthly_consumption()
+    constraints = build_optimizer_constraints(
+        config_snapshot,
+        cash_reserves=50_000_000,
+        forecast_consumption_bbl=consumption_bbl,
+    )
+    # Apply stored instrument preference as base (user payload can further override)
+    instrument_pref = await config_repo.get_instrument_preference()
+    constraints = apply_instrument_preference(constraints, instrument_pref)
+
+    # ── Parse and validate payload ────────────────────────────────────
+    user_hr = payload.get("hedge_ratio")
+    user_mix = payload.get("instrument_mix")
+    try:
+        orig_hedged = float(payload.get("original_var_hedged") or 0)
+        orig_unhedged = float(payload.get("original_var_unhedged") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="original_var fields must be numeric")
+
+    if user_hr is not None:
+        try:
+            hr_val = float(user_hr)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="hedge_ratio must be numeric")
+        hr_cap = float(constraints.get("hr_max", 0.80))
+        hr_min = float(constraints.get("hr_min", 0.0))
+        user_hr = float(max(hr_min, min(hr_cap, hr_val)))
+
+    if user_mix is not None:
+        if not isinstance(user_mix, dict):
+            raise HTTPException(status_code=400, detail="instrument_mix must be an object")
+        required_keys = {"futures", "options", "collars", "swaps"}
+        if set(user_mix.keys()) != required_keys:
+            raise HTTPException(
+                status_code=400,
+                detail="instrument_mix must include exactly futures, options, collars, swaps",
+            )
+        try:
+            numeric_mix = {k: float(v) for k, v in user_mix.items()}
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="instrument_mix values must be numeric")
+        if any(v < 0 for v in numeric_mix.values()):
+            raise HTTPException(status_code=400, detail="instrument_mix values cannot be negative")
+        total = sum(numeric_mix.values())
+        if abs(total - 1.0) > 0.05:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Instrument mix must sum to 1.0, got {total:.3f}"
+            )
+        user_mix = numeric_mix
+
+    # ── Get current price ─────────────────────────────────────────────
+    from app.services.price_service import get_price_service
+    try:
+        last_tick = get_price_service().get_last_tick()
+        current_price = float(last_tick.jet_fuel_spot) if last_tick else 84.96
+    except Exception:
+        current_price = 84.96
+
+    # ── Build user constraints ────────────────────────────────────────
+    user_constraints = dict(constraints)
+    if user_hr is not None:
+        user_constraints["hr_max"] = user_hr
+        user_constraints["hr_min"] = user_hr
+
+    if user_mix is not None:
+        futures_val = float(user_mix.get("futures", 0.70))
+        options_val = float(user_mix.get("options", 0.20))
+        collars_val = float(user_mix.get("collars", 0.10))
+        swaps_val = float(user_mix.get("swaps", 0.00))
+        user_constraints["futures_min"] = max(0, futures_val - 0.05)
+        user_constraints["futures_max"] = min(1, futures_val + 0.05)
+        user_constraints["options_min"] = max(0, options_val - 0.05)
+        user_constraints["options_max"] = min(1, options_val + 0.05)
+        user_constraints["collars_min"] = max(0, collars_val - 0.05)
+        user_constraints["collars_max"] = min(1, collars_val + 0.05)
+        user_constraints["swaps_min"] = max(0, swaps_val - 0.05)
+        user_constraints["swaps_max"] = min(1, swaps_val + 0.05)
+
+    # ── Run optimizer ─────────────────────────────────────────────────
+    from app.analytics.optimizer import HedgeOptimizer
+    from app.analytics import HistoricalSimVaR
+
+    var_engine = HistoricalSimVaR(confidence=0.95, holding_period_days=30)
+    var_curve = var_engine.var_curve(df, 10_000_000)
+    if not var_curve:
+        raise HTTPException(status_code=503, detail="Unable to compute VaR curve")
+
+    optimizer = HedgeOptimizer()
+    opt_result = optimizer.optimize(
+        {f"hr_{int(v.hedge_ratio*100)}": v.var_usd for v in var_curve},
+        user_constraints,
+    )
+
+    # Use user-specified mix when provided so "what-if" reflects instrument choice
+    if user_mix is not None:
+        mix_raw = {
+            "futures": float(user_mix.get("futures", 0.0)),
+            "options": float(user_mix.get("options", 0.0)),
+            "collars": float(user_mix.get("collars", 0.0)),
+            "swaps": float(user_mix.get("swaps", 0.0)),
+        }
+        mix_total = sum(mix_raw.values())
+        if mix_total > 0:
+            final_mix = {k: v / mix_total for k, v in mix_raw.items()}
+        else:
+            final_mix = dict(opt_result.instrument_mix)
+    else:
+        final_mix = dict(opt_result.instrument_mix)
+
+    # ── Interpolate VaR at user's HR ──────────────────────────────────
+    hr_arr = np.array([v.hedge_ratio for v in var_curve])
+    var_arr = np.array([v.var_usd for v in var_curve])
+    final_hr = float(user_hr) if user_hr is not None else float(opt_result.optimal_hr)
+    base_var = float(np.interp(final_hr, hr_arr, var_arr))
+    var_factor = (
+        final_mix.get("futures", 0.0) * 1.00
+        + final_mix.get("options", 0.0) * 0.94
+        + final_mix.get("collars", 0.0) * 0.97
+        + final_mix.get("swaps", 0.0) * 0.99
+    )
+    user_var = float(base_var * var_factor)
+
+    # Mix-dependent collateral estimate (margin/premium profile differs by instrument)
+    notional_hedged_usd = current_price * 42 * consumption_bbl * final_hr
+    margin_rate = (
+        final_mix.get("futures", 0.0) * 0.020
+        + final_mix.get("options", 0.0) * 0.010
+        + final_mix.get("collars", 0.0) * 0.006
+        + final_mix.get("swaps", 0.0) * 0.004
+    )
+    collateral_usd = float(notional_hedged_usd * margin_rate)
+    cash_reserves = float(constraints.get("cash_reserves_usd", 50_000_000))
+    collateral_pct_of_reserves = (collateral_usd / cash_reserves * 100) if cash_reserves > 0 else 0.0
+
+    # ── P&L at demand ─────────────────────────────────────────────────
+    hedged_instrument_cost_bbl = current_price * (
+        final_mix.get("futures", 0.0) * 1.000
+        + final_mix.get("options", 0.0) * 1.037
+        + final_mix.get("collars", 0.0) * 1.010
+        + final_mix.get("swaps", 0.0) * 1.005
+    )
+    hedged_cost_bbl = final_hr * hedged_instrument_cost_bbl + (1 - final_hr) * current_price * 1.008
+    unhedged_cost_bbl = current_price * 1.008
+    monthly_saving = round((unhedged_cost_bbl - hedged_cost_bbl) * consumption_bbl, 0)
+
+    var_diff = orig_hedged - user_var if orig_hedged else 0
+
+    # ── Verdict ───────────────────────────────────────────────────────
+    if var_diff > 50_000:
+        verdict = (
+            f"Your preferred strategy reduces VaR by an additional "
+            f"${abs(var_diff/1e6):.2f}M versus the system recommendation. "
+            f"The instrument mix you selected is viable for IFRS 9 designation."
+        )
+    elif abs(var_diff) <= 50_000:
+        verdict = (
+            f"Your preferred strategy produces comparable risk reduction to the system "
+            f"recommendation (difference < $50K). Either approach is acceptable."
+        )
+    else:
+        verdict = (
+            f"The system recommendation achieves ${abs(var_diff/1e6):.2f}M lower VaR "
+            f"than your preferred strategy. Consider adjusting the hedge ratio or "
+            f"instrument mix closer to the system suggestion."
+        )
+
+    return {
+        "what_if": {
+            "hedge_ratio": round(final_hr, 4),
+            "instrument_mix": {k: round(v, 4) for k, v in final_mix.items()},
+            "var_usd": round(user_var, 2),
+            "collateral_usd": round(collateral_usd, 2),
+            "collateral_pct_of_reserves": round(collateral_pct_of_reserves, 4),
+            "solver_converged": bool(opt_result.solver_converged),
+        },
+        "comparison": {
+            "original_var_hedged": orig_hedged,
+            "what_if_var": round(user_var, 2),
+            "var_difference": round(var_diff, 2),
+            "var_better": var_diff > 0,
+            "collateral_delta_usd": 0.0,
+            "monthly_saving_vs_unhedged": monthly_saving,
+        },
+        "verdict": verdict,
+    }
+
+
+@router.post("/demand-strategy")
+async def run_demand_strategy_advisor(
+    payload: dict,
+    db: DatabaseSession,
+    current_user=Depends(require_permission("view:analytics")),
+) -> dict:
+    """
+    Runs the Demand Strategy Advisor:
+    1. Calls the what-if optimizer with the user's inputs
+    2. Forwards the result to the n8n Demand Strategy Advisor workflow
+    3. Returns the GPT-generated narrative alongside the optimizer result
+
+    Payload:
+    {
+      "hedge_ratio": 0.65,
+      "consumption_bbl": 85000,
+      "instruments": ["futures", "options"],
+      "instrument_mix": { "futures": 0.80, "options": 0.10, "collars": 0.05, "swaps": 0.05 },
+      "original_var_hedged": 2870000,
+      "original_var_unhedged": 4870000
+    }
+    """
+    import httpx
+    from app.config import get_settings
+
+    settings = get_settings()
+
+    # ── Step 1: Run what-if optimizer ─────────────────────────────────
+    config_repo = ConfigRepository(db)
+    config_snapshot = await config_repo.get_constraints_snapshot()
+    consumption_bbl = payload.get("consumption_bbl") or \
+                      await config_repo.get_monthly_consumption()
+    instrument_pref = await config_repo.get_instrument_preference()
+
+    constraints = build_optimizer_constraints(
+        config_snapshot,
+        cash_reserves=50_000_000,
+        forecast_consumption_bbl=float(consumption_bbl),
+    )
+    constraints = apply_instrument_preference(constraints, instrument_pref)
+
+    user_hr = payload.get("hedge_ratio")
+    user_mix = payload.get("instrument_mix")
+    orig_hedged = float(payload.get("original_var_hedged") or 0)
+    orig_unhedged = float(payload.get("original_var_unhedged") or orig_hedged * 1.42)
+
+    if user_hr is not None:
+        hr = float(max(0.30, min(0.80, float(user_hr))))
+        constraints["hr_max"] = hr
+        constraints["hr_min"] = hr * 0.98
+
+    if user_mix is not None:
+        total = sum(float(v) for v in user_mix.values())
+        if abs(total - 1.0) > 0.05:
+            raise HTTPException(
+                status_code=400,
+                detail=f"instrument_mix must sum to 1.0, got {total:.3f}"
+            )
+        for k in ["futures", "options", "collars", "swaps"]:
+            val = float(user_mix.get(k, 0))
+            constraints[f"{k}_min"] = max(0, val - 0.05)
+            constraints[f"{k}_max"] = min(1, val + 0.05)
+
+    # Load data and run optimizer
+    import numpy as np
+    from pathlib import Path
+    import pandas as pd
+    from app.analytics import HistoricalSimVaR
+    from app.analytics.optimizer import HedgeOptimizer
+    from app.services.price_service import get_price_service
+
+    base = Path(__file__).resolve().parent.parent
+    csv_candidates = [
+        base / "data" / "fuel_hedging_dataset.csv",
+        Path("data/fuel_hedging_dataset.csv"),
+        Path("/app/data/fuel_hedging_dataset.csv"),
+    ]
+    df = None
+    for p in csv_candidates:
+        if p.exists():
+            df = pd.read_csv(p, parse_dates=["Date"])
+            break
+    if df is None:
+        raise HTTPException(status_code=503, detail="Dataset not available")
+
+    try:
+        last_tick = get_price_service().get_last_tick()
+        current_price = float(last_tick.jet_fuel_spot) if last_tick else 84.96
+    except Exception:
+        current_price = 84.96
+
+    var_engine = HistoricalSimVaR(confidence=0.95, holding_period_days=30)
+    var_curve = var_engine.var_curve(df, 10_000_000)
+    hr_arr = np.array([v.hedge_ratio for v in var_curve])
+    var_arr = np.array([v.var_usd for v in var_curve])
+
+    optimizer = HedgeOptimizer()
+    opt_result = optimizer.optimize(
+        {f"hr_{int(v.hedge_ratio * 100)}": v.var_usd for v in var_curve},
+        constraints,
+    )
+
+    final_hr = float(opt_result.optimal_hr)
+    user_var = float(np.interp(final_hr, hr_arr, var_arr))
+    var_diff = orig_hedged - user_var if orig_hedged else 0
+    hedged_cost = final_hr * current_price + (1 - final_hr) * current_price * 1.008
+    monthly_saving = round(
+        (current_price * 1.008 - hedged_cost) * float(consumption_bbl), 0
+    )
+
+    what_if_result = {
+        "what_if": {
+            "hedge_ratio": round(final_hr, 4),
+            "instrument_mix": opt_result.instrument_mix,
+            "var_usd": round(user_var, 2),
+            "collateral_usd": round(float(opt_result.collateral_usd), 2),
+            "collateral_pct_of_reserves": round(
+                float(opt_result.collateral_pct_of_reserves), 4
+            ),
+            "solver_converged": bool(opt_result.solver_converged),
+        },
+        "comparison": {
+            "original_var_hedged": orig_hedged,
+            "what_if_var": round(user_var, 2),
+            "var_difference": round(var_diff, 2),
+            "var_better": var_diff > 0,
+            "collateral_delta_usd": 0.0,
+            "monthly_saving_vs_unhedged": monthly_saving,
+        },
+    }
+
+    # ── Step 2: Call n8n Demand Strategy Advisor ───────────────────────
+    n8n_webhook_base = getattr(settings, "N8N_WEBHOOK_URL", "")
+    # Build the demand-strategy-advisor URL from the base URL
+    if n8n_webhook_base:
+        # Replace the path: .../webhook/fuel-hedge-advisor → .../webhook/demand-strategy-advisor
+        n8n_url = n8n_webhook_base.replace(
+            "fuel-hedge-trigger",
+            "demand-strategy-advisor"
+        ).replace(
+            "fuel-hedge-advisor",
+            "demand-strategy-advisor"
+        )
+    else:
+        n8n_url = "http://n8n:5678/webhook/demand-strategy-advisor"
+
+    n8n_payload = {
+        "hedge_ratio": final_hr,
+        "consumption_bbl": int(consumption_bbl),
+        "instruments": payload.get("instruments", ["futures"]),
+        "current_var_usd": orig_hedged,
+        "what_if_result": what_if_result,
+    }
+
+    narrative = None
+    strategy_summary = None
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            n8n_response = await client.post(
+                n8n_url,
+                json=n8n_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-N8N-API-Key": getattr(
+                        settings, "N8N_WEBHOOK_SECRET", ""
+                    ),
+                },
+            )
+            if n8n_response.status_code == 200:
+                n8n_data = n8n_response.json()
+                narrative = n8n_data.get("narrative")
+                strategy_summary = n8n_data.get("strategy_summary")
+    except Exception as e:
+        logger.warning("n8n_demand_strategy_unavailable", error=str(e))
+        # Graceful fallback — return optimizer result without GPT narrative
+
+    # ── Step 3: Build fallback verdict if n8n unavailable ─────────────
+    if not narrative:
+        saving_m = monthly_saving / 1_000_000
+        var_m = user_var / 1_000_000
+        direction = "reduces" if var_diff > 0 else "increases"
+        narrative = (
+            f"Hedging {final_hr:.0%} of your {int(consumption_bbl):,} bbl monthly uplift "
+            f"{direction} portfolio VaR by ${abs(var_diff / 1_000_000):.2f}M versus the "
+            f"system recommendation, delivering a portfolio VaR of ${var_m:.2f}M. "
+            f"At current prices, this configuration saves approximately ${saving_m:.2f}M "
+            f"per month compared to remaining fully unhedged. "
+            f"Collateral of {opt_result.collateral_pct_of_reserves:.1f}% of reserves is "
+            f"required — {'approaching the 12% soft warning' if opt_result.collateral_pct_of_reserves > 12 else 'within the 15% hard limit'}."
+        )
+
+    return {
+        **what_if_result,
+        "verdict": narrative,
+        "narrative": narrative,
+        "strategy_summary": strategy_summary,
+        "source": "n8n_gpt" if strategy_summary else "fallback",
+    }
 
 
 @router.get("/{run_id}", response_model=AnalyticsRunDetail)

@@ -27,7 +27,10 @@ from app.analytics import (
     StressTestEngine,
 )
 from app.analytics.domain import BasisRiskMetric, ForecastResult, OptimizationResult, VaRResult
-from app.analytics.optimizer import build_optimizer_constraints
+from app.analytics.optimizer.constraints import (
+    apply_instrument_preference,
+    build_optimizer_constraints,
+)
 from app.constants import (
     IFRS9_R2_MIN_PROSPECTIVE,
     MAPE_ALERT,
@@ -433,6 +436,7 @@ class AnalyticsPipeline:
         # Get current constraints from config
         config_snapshot = await self.config_repo.get_constraints_snapshot()
         consumption_bbl = await self.config_repo.get_monthly_consumption()
+        instrument_pref = await self.config_repo.get_instrument_preference()
 
         # Build constraints
         constraints = build_optimizer_constraints(
@@ -440,6 +444,8 @@ class AnalyticsPipeline:
             cash_reserves=50_000_000,  # TODO: Get from platform config
             forecast_consumption_bbl=consumption_bbl,
         )
+        # Apply CFO instrument preference on top of base constraints
+        constraints = apply_instrument_preference(constraints, instrument_pref)
 
         # Calculate VaR curve for optimizer
         var_curve = self.var_engine.var_curve(df, float(self.notional_usd))
