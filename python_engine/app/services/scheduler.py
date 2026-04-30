@@ -36,8 +36,11 @@ async def trigger_daily_analytics_pipeline() -> None:
     log.info("scheduler.trigger_daily_analytics_pipeline", utc_time=datetime.now(timezone.utc))
     notional = Decimal("10000000")
     try:
-        await run_analytics_pipeline_background(notional)
-        log.info("daily_analytics_pipeline_finished")
+        run_id = await run_analytics_pipeline_background(notional)
+        if run_id:
+            log.info("daily_analytics_pipeline_finished", run_id=run_id)
+        else:
+            log.error("daily_analytics_pipeline_error", error="pipeline returned no run_id")
     except Exception as e:
         log.error("daily_analytics_pipeline_error", error=str(e), exc_info=True)
 

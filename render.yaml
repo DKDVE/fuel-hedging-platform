@@ -91,6 +91,10 @@ services:
       # Starter 512MB: skip TensorFlow/LSTM during pipeline (avoids OOM). Upgrade RAM + set true for LSTM.
       - key: ENABLE_LSTM_INFERENCE
         value: "false"
+      - key: PIPELINE_MIN_OBSERVATIONS
+        value: "252"
+      - key: PIPELINE_LOOKBACK_DAYS
+        value: "1460"
       - key: WEB_CONCURRENCY
         value: "1"
       - key: TF_CPP_MIN_LOG_LEVEL

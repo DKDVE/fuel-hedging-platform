@@ -129,6 +129,8 @@ class Settings:
     VAR_REDUCTION_TARGET: float = 0.40
     MAX_COVERAGE_RATIO: float = 1.10
     PIPELINE_TIMEOUT_MINUTES: int = 15
+    PIPELINE_MIN_OBSERVATIONS: int = _env_int("PIPELINE_MIN_OBSERVATIONS", 252)
+    PIPELINE_LOOKBACK_DAYS: int = _env_int("PIPELINE_LOOKBACK_DAYS", 1460)
 
     # Scheduler (Render-safe defaults)
     SCHEDULER_ENABLED: bool = _env_bool("SCHEDULER_ENABLED", True)

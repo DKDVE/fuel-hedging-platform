@@ -147,13 +147,17 @@ class AnalyticsPipeline:
         logger.info("analytics_pipeline_start", run_id=str(run_id), date=str(run_date))
 
         try:
+            settings = get_settings()
+            min_required = max(30, int(settings.PIPELINE_MIN_OBSERVATIONS))
+            lookback_days = max(365, int(settings.PIPELINE_LOOKBACK_DAYS))
+
             # Step 1: Fetch historical data
-            df = await self._fetch_historical_data()
-            if len(df) < 252:  # Minimum 1 year
+            df = await self._fetch_historical_data(lookback_days=lookback_days)
+            if len(df) < min_required:
                 raise ModelError(
                     message=f"Insufficient historical data: {len(df)} observations",
                     model_name="pipeline",
-                    context={"min_required": 252, "actual": len(df)},
+                    context={"min_required": min_required, "actual": len(df)},
                 )
 
             # Step 2: Run forecasting
@@ -235,7 +239,6 @@ class AnalyticsPipeline:
             )
 
             # Trigger n8n workflow directly (avoids API_INTERNAL_URL resolution on Render)
-            settings = get_settings()
             n8n_url = settings.N8N_TRIGGER_URL or f"{settings.N8N_INTERNAL_URL.rstrip('/')}{settings.N8N_TRIGGER_PATH}"
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
@@ -284,7 +287,7 @@ class AnalyticsPipeline:
                 context={"run_id": str(run_id)},
             )
 
-    async def _fetch_historical_data(self, lookback_days: int = 730) -> pd.DataFrame:
+    async def _fetch_historical_data(self, lookback_days: int = 1460) -> pd.DataFrame:
         """Fetch historical price data from database.
 
         Args:
@@ -301,6 +304,19 @@ class AnalyticsPipeline:
             .order_by(PriceTick.time)
         )
         ticks = result.scalars().all()
+
+        # Fallback to full history if lookback window is sparse (common after DB reseed/restart).
+        if 0 < len(ticks) < 252:
+            full_result = await self.db.execute(select(PriceTick).order_by(PriceTick.time))
+            full_ticks = full_result.scalars().all()
+            if len(full_ticks) > len(ticks):
+                logger.warning(
+                    "historical_data_window_too_small_fallback_to_full_history",
+                    lookback_days=lookback_days,
+                    rows_in_window=len(ticks),
+                    rows_in_full_history=len(full_ticks),
+                )
+                ticks = full_ticks
 
         if not ticks:
             raise ModelError(
@@ -324,7 +340,12 @@ class AnalyticsPipeline:
             ]
         )
 
-        logger.info("historical_data_fetched", rows=len(df))
+        logger.info(
+            "historical_data_fetched",
+            rows=len(df),
+            lookback_days=lookback_days,
+            min_required=get_settings().PIPELINE_MIN_OBSERVATIONS,
+        )
         return df
 
     async def _run_forecasting(self, df: pd.DataFrame) -> ForecastResult:

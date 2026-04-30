@@ -22,6 +22,7 @@ from app.constants import (
     MAPE_ALERT,
     MAPE_TARGET,
 )
+from app.core.units import normalize_ratio_value
 from app.db.models import Alert, AlertSeverity, AlertType
 from app.services.price_service import get_price_service
 
@@ -125,20 +126,20 @@ class AlertService:
 
     async def _check_collateral(self, db: AsyncSession, run: object) -> None:
         opt = getattr(run, "optimizer_result", None) or {}
-        collateral_pct = float(opt.get("collateral_pct_of_reserves", 0) or 0)
-        if collateral_pct > 0.13:
-            severity = AlertSeverity.CRITICAL if collateral_pct > 0.145 else AlertSeverity.WARNING
+        collateral_ratio = normalize_ratio_value(opt.get("collateral_pct_of_reserves", 0) or 0)
+        if collateral_ratio > 0.13:
+            severity = AlertSeverity.CRITICAL if collateral_ratio > 0.145 else AlertSeverity.WARNING
             await self._create_alert(
                 db,
                 AlertType.COLLATERAL_HIGH,
                 severity,
-                title=f"Collateral at {collateral_pct*100:.1f}% of reserves",
+                title=f"Collateral at {collateral_ratio*100:.1f}% of reserves",
                 message=(
-                    f"Collateral utilisation ({collateral_pct*100:.1f}%) is "
+                    f"Collateral utilisation ({collateral_ratio*100:.1f}%) is "
                     f"approaching the {COLLATERAL_LIMIT*100:.0f}% limit. "
                     "New positions may be restricted."
                 ),
-                metric_value=collateral_pct,
+                metric_value=collateral_ratio,
                 threshold_value=COLLATERAL_LIMIT,
             )
 

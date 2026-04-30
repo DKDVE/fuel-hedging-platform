@@ -19,6 +19,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.config import get_settings
+from app.core.units import normalize_percent_value
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -168,7 +169,9 @@ async def get_dashboard_summary(
     opt_data = run.optimizer_result or {}
     var_usd = float(var_data.get("var_usd", 0) or 0)
     optimal_hr = float(opt_data.get("optimal_hr", 0) or 0)
-    collateral = float(opt_data.get("collateral_pct_of_reserves", 0) or opt_data.get("collateral_pct", 0) or 0)
+    collateral = normalize_percent_value(
+        opt_data.get("collateral_pct_of_reserves", 0) or opt_data.get("collateral_pct", 0) or 0
+    )
     var_reduction = float(opt_data.get("var_reduction_pct", 0) or 0)
     mape = float(run.mape or 0)
     basis_metrics = run.basis_metrics or {}

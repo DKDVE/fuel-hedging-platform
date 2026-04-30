@@ -20,6 +20,7 @@ from app.constants import (
     IFRS9_R2_WARN,
     MAPE_TARGET,
 )
+from app.core.units import normalize_percent_value, normalize_ratio_value
 from app.db.models import AnalyticsRun, AnalyticsRunStatus, HedgePosition, PositionStatus
 from app.dependencies import DatabaseSession, require_permission
 from app.repositories import AnalyticsRepository, ConfigRepository, PositionRepository
@@ -144,7 +145,9 @@ async def get_compliance_summary(
     if latest_run:
         opt = latest_run.optimizer_result or {}
         hr = float(opt.get("optimal_hr", 0.65) or 0.65)
-        collateral_pct = float(opt.get("collateral_pct_of_reserves", 0.10) or 0.10)
+        raw_collateral = opt.get("collateral_pct_of_reserves", 0.10)
+        collateral_pct_value = normalize_percent_value(raw_collateral)
+        collateral_ratio = normalize_ratio_value(raw_collateral)
         mape = float(latest_run.mape or 4.5)
 
         # Counterparty concentration (by proxy)
@@ -173,12 +176,12 @@ async def get_compliance_summary(
             },
             {
                 "limit_name": "Collateral Utilisation",
-                "current_value": collateral_pct,
+                "current_value": collateral_ratio,
                 "limit_value": collateral_limit,
-                "utilisation_pct": (collateral_pct / collateral_limit * 100) if collateral_limit > 0 else 0,
-                "status": _limit_status((collateral_pct / collateral_limit * 100) if collateral_limit > 0 else 0),
+                "utilisation_pct": (collateral_ratio / collateral_limit * 100) if collateral_limit > 0 else 0,
+                "status": _limit_status((collateral_ratio / collateral_limit * 100) if collateral_limit > 0 else 0),
                 "unit": "pct_of_reserves",
-                "display_current": f"{collateral_pct * 100:.1f}%",
+                "display_current": f"{collateral_pct_value:.1f}%",
                 "display_limit": f"≤ {collateral_limit * 100:.0f}%",
             },
             {
