@@ -7,6 +7,8 @@ import { ArrowUpDown, Filter, Plus, ArrowUp, ArrowDown, Minus, Calendar, X } fro
 import { usePositions, type Position } from '@/hooks/usePositions';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
+import { UserRole } from '@/types/api';
 
 interface MonthlyCollateral {
   monthKey: string;
@@ -54,6 +56,8 @@ function buildCollateralCalendar(positions: import('@/hooks/usePositions').Posit
 
 export function PositionsPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const isAnalyst = user?.role === UserRole.ANALYST;
   const [sortField, setSortField] = useState<keyof Position>('expiry_date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -91,6 +95,10 @@ export function PositionsPage() {
   const maxMonthlyCollateral = Math.max(...calendar.map((m) => m.totalCollateral), 1);
 
   const handleCreatePosition = async () => {
+    if (isAnalyst) {
+      toast.error('Analyst role cannot create new positions.');
+      return;
+    }
     if (!newPosition.notional_usd || !newPosition.entry_price || !newPosition.expiry_date) {
       toast.error('Please fill in all required fields.');
       return;
@@ -184,13 +192,15 @@ export function PositionsPage() {
             Active and historical hedging positions across all instruments
           </p>
         </div>
-        <button
-          onClick={() => setShowNewPositionForm(true)}
-          className="btn btn-primary flex items-center gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          New Position
-        </button>
+        {!isAnalyst && (
+          <button
+            onClick={() => setShowNewPositionForm(true)}
+            className="btn btn-primary flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            New Position
+          </button>
+        )}
       </div>
 
       {/* Collateral Meter */}
@@ -620,7 +630,7 @@ export function PositionsPage() {
         )}
       </div>
 
-      {showNewPositionForm && (
+      {!isAnalyst && showNewPositionForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center
                         bg-black/60 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl

@@ -25,6 +25,13 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
   const { user, loading, hasPermission, isRole } = useAuth();
 
+  const getBestAllowedRoute = (): string => {
+    if (hasPermission('read:analytics')) return '/';
+    if (hasPermission('read:positions')) return '/positions';
+    if (hasPermission('read:audit')) return '/audit';
+    return '/';
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -39,17 +46,17 @@ export function ProtectedRoute({
 
   // Check permission-based access
   if (requiredPermission && !hasPermission(requiredPermission)) {
-    return <Navigate to="/unauthorized" replace />;
+    return <Navigate to={getBestAllowedRoute()} replace />;
   }
 
   // Check role-based access
   if (requiredRole && !isRole(requiredRole) && !isRole('admin')) {
-    return <Navigate to="/unauthorized" replace />;
+    return <Navigate to={getBestAllowedRoute()} replace />;
   }
 
   // Check allowed roles
   if (allowedRoles && !allowedRoles.some(role => isRole(role)) && !isRole('admin')) {
-    return <Navigate to="/unauthorized" replace />;
+    return <Navigate to={getBestAllowedRoute()} replace />;
   }
 
   return <>{children}</>;

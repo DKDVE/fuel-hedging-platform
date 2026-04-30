@@ -7,10 +7,11 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { usePermissions } from '@/hooks/usePermissions';
 
-const primaryItems = [
+const primaryItems: { path: string; label: string; icon: typeof LayoutDashboard; permission?: string }[] = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/recommendations', label: 'Recs', icon: Lightbulb },
+  { path: '/recommendations', label: 'Recs', icon: Lightbulb, permission: 'recommendations' },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/positions', label: 'Positions', icon: Briefcase },
   { path: '/compliance', label: 'Comply', icon: ShieldCheck },
@@ -18,10 +19,12 @@ const primaryItems = [
 
 export function MobileBottomNav() {
   const location = useLocation();
+  const { canViewPage } = usePermissions();
+  const visibleItems = primaryItems.filter((item) => !item.permission || canViewPage(item.permission));
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-700 flex md:hidden">
-      {primaryItems.map((item) => {
+      {visibleItems.map((item) => {
         const isActive =
           location.pathname === item.path ||
           (item.path !== '/' && location.pathname.startsWith(item.path));

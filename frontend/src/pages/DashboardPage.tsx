@@ -99,7 +99,7 @@ export function DashboardPage() {
   const triggerPipeline = useTriggerAnalytics();
 
   const canTriggerPipeline = hasPermission('trigger:pipeline');
-  const canLoadCsv = hasPermission('read:analytics');
+  const canLoadCsv = hasPermission('trigger:pipeline');
   const loadCsv = useLoadCsv();
   const [consumption, setConsumption] = useState(100_000);
   const [savedConsumption, setSavedConsumption] = useState(100_000);

@@ -14,7 +14,7 @@ export function usePermissions() {
 
   const canViewPage = (page: string): boolean => {
     const pagePermissions: Record<string, Permission> = {
-      recommendations: 'read:analytics',
+      recommendations: 'approve:recommendation',
       analytics: 'read:analytics',
       positions: 'read:positions',
       compliance: 'read:analytics',

@@ -33,7 +33,7 @@ export function AnalyticsPage() {
   const { hasPermission } = usePermissions();
 
   const canTrigger = hasPermission('trigger:pipeline');
-  const canLoadCsv = hasPermission('read:analytics');
+  const canLoadCsv = hasPermission('trigger:pipeline');
   const [generatingReport, setGeneratingReport] = useState(false);
 
   const handleDownloadReport = async () => {
