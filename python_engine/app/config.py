@@ -112,6 +112,9 @@ class Settings:
     ).split(",")
     
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    REPORTING_ENTITY_NAME: str = os.getenv("REPORTING_ENTITY_NAME", "Airline Operations Ltd").strip()
+    REPORTING_CURRENCY: str = os.getenv("REPORTING_CURRENCY", "USD").strip()
+    IFRS9_REPORT_V2: bool = _env_bool("IFRS9_REPORT_V2", True)
 
     # Domain constants (from .cursorrules)
     HR_HARD_CAP: float = 0.80

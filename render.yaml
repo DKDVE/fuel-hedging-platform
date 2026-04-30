@@ -43,6 +43,12 @@ services:
         value: production
       - key: LOG_LEVEL
         value: INFO
+      - key: REPORTING_ENTITY_NAME
+        value: Airline Operations Ltd
+      - key: REPORTING_CURRENCY
+        value: USD
+      - key: IFRS9_REPORT_V2
+        value: "true"
       # Use N8N_TRIGGER_URL (full URL) when internal hostname fails to resolve
       - key: N8N_TRIGGER_URL
         sync: false   # e.g. https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger

@@ -13,9 +13,8 @@ sections if positions or analytics runs are absent.
 
 import io
 from datetime import date, datetime, timezone, timedelta
-from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import uuid4
 
 import structlog
 from reportlab.lib import colors
@@ -34,6 +33,7 @@ from reportlab.platypus import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.constants import IFRS9_R2_MIN_PROSPECTIVE, IFRS9_RETRO_HIGH, IFRS9_RETRO_LOW
 from app.repositories.analytics import AnalyticsRepository
 from app.repositories.market_data import MarketDataRepository
@@ -59,6 +59,7 @@ class IFRS9ReportService:
         Returns bytes — caller streams as file download.
         Never raises — returns a valid PDF even with no data.
         """
+        settings = get_settings()
         analytics_repo = AnalyticsRepository(db)
         positions_repo = PositionRepository(db)
         market_repo = MarketDataRepository(db)
@@ -76,6 +77,21 @@ class IFRS9ReportService:
             if db_tick:
                 current_price = float(db_tick.jet_fuel_spot)
 
+        generated_at = datetime.now(timezone.utc)
+        report_meta = {
+            "report_id": str(uuid4()),
+            "generated_at": generated_at.isoformat(),
+            "period_end": date.today().isoformat(),
+            "next_test_date": (date.today() + timedelta(days=90)).isoformat(),
+            "entity_name": settings.REPORTING_ENTITY_NAME,
+            "currency": settings.REPORTING_CURRENCY,
+            "analytics_run_id": str(latest_run.id) if latest_run is not None else "N/A",
+            "analytics_run_date": str(latest_run.run_date) if latest_run is not None else "N/A",
+            "positions_count": len(positions),
+            "price_source": "live_feed" if last_tick is not None else ("db_last_tick" if current_price is not None else "none"),
+            "current_price": current_price,
+        }
+
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(
             buffer,
@@ -87,11 +103,20 @@ class IFRS9ReportService:
         )
         story: list[Any] = []
 
-        story += self._build_header()
+        report_v2_enabled = settings.IFRS9_REPORT_V2
+
+        story += self._build_header(report_meta, include_evidence=report_v2_enabled)
+        if report_v2_enabled:
+            story += self._build_methodology_and_controls(report_meta)
         story += self._build_designation_summary(positions)
         story += self._build_prospective_test(latest_run)
         story += self._build_retrospective_test(positions, current_price)
+        if report_v2_enabled:
+            story += self._build_data_quality_section(latest_run, positions, current_price)
         story += self._build_conclusion(positions, latest_run)
+        if report_v2_enabled:
+            story += self._build_appendix_evidence(latest_run, positions, current_price, report_meta)
+            story += self._build_signoff_section(report_meta)
 
         def add_footer(canvas, doc):
             canvas.saveState()
@@ -129,10 +154,9 @@ class IFRS9ReportService:
         # StyleSheet.byName is the name->style mapping; dict(styles) yields indices, not names
         return {**styles.byName, **custom}
 
-    def _build_header(self) -> list[Any]:
+    def _build_header(self, report_meta: dict[str, Any], include_evidence: bool = True) -> list[Any]:
         today = date.today()
         quarter_start = date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
-        next_test = today + timedelta(days=90)
         styles = self._styles()
 
         return [
@@ -154,7 +178,7 @@ class IFRS9ReportService:
                 styles["body"],
             ),
             Paragraph(
-                "<b>Entity:</b> Airline Operations Ltd",
+                f"<b>Entity:</b> {report_meta['entity_name']}",
                 styles["body"],
             ),
             Paragraph(
@@ -165,6 +189,16 @@ class IFRS9ReportService:
                 "<b>Reference:</b> Paragraphs 6.4.1(c), B6.4.1–B6.4.19",
                 styles["body"],
             ),
+            *((
+                [
+                    Paragraph(f"<b>Report ID:</b> {report_meta['report_id']}", styles["body"]),
+                    Paragraph(f"<b>Generated (UTC):</b> {report_meta['generated_at']}", styles["body"]),
+                    Paragraph(
+                        f"<b>Evidence Run:</b> {report_meta['analytics_run_id']} (date: {report_meta['analytics_run_date']})",
+                        styles["body"],
+                    ),
+                ]
+            ) if include_evidence else []),
             Spacer(1, 12),
             HRFlowable(width="100%", thickness=1, color=NAVY),
             Paragraph(
@@ -179,11 +213,26 @@ class IFRS9ReportService:
             ),
             Paragraph(
                 "Overall hedge effectiveness: See conclusion below. "
-                "Next scheduled test: " + next_test.isoformat(),
+                "Next scheduled test: " + report_meta["next_test_date"],
                 styles["body"],
             ),
             HRFlowable(width="100%", thickness=1, color=NAVY),
             Spacer(1, 16),
+        ]
+
+    def _build_methodology_and_controls(self, report_meta: dict[str, Any]) -> list[Any]:
+        styles = self._styles()
+        content = (
+            "<b>Methodology and Controls</b><br/>"
+            "1) Prospective assessment evaluates economic relationship and hedge ratio alignment under IFRS 9 para 6.4.1(c).<br/>"
+            "2) Retrospective dollar-offset is presented as management monitoring evidence (not as a standalone IFRS 9 qualification bright-line test).<br/>"
+            f"3) Reporting currency: {report_meta['currency']}. Data lineage is tied to analytics run {report_meta['analytics_run_id']}."
+        )
+        return [
+            Paragraph("<b>0. METHODOLOGY & CONTROL CONTEXT</b>", styles["navy_header"]),
+            HRFlowable(width="100%", thickness=1, color=NAVY),
+            Paragraph(content, styles["body"]),
+            Spacer(1, 12),
         ]
 
     def _build_designation_summary(
@@ -275,46 +324,54 @@ class IFRS9ReportService:
             ]
 
         basis = latest_run.basis_metrics or {}
-        r2_ho = float(basis.get("r2_heating_oil", 0) or 0)
-        r2_brent = float(basis.get("r2_brent", 0) or 0)
-        r2_wti = float(basis.get("r2_wti", 0) or 0)
+        r2_ho_raw = basis.get("r2_heating_oil")
+        r2_brent_raw = basis.get("r2_brent")
+        r2_wti_raw = basis.get("r2_wti")
+        r2_ho = float(r2_ho_raw) if r2_ho_raw is not None else None
+        r2_brent = float(r2_brent_raw) if r2_brent_raw is not None else None
+        r2_wti = float(r2_wti_raw) if r2_wti_raw is not None else None
 
-        def status_cell(r2: float) -> str:
+        def status_cell(r2: float | None) -> str:
+            if r2 is None:
+                return "NO_DATA"
             if r2 >= IFRS9_R2_MIN_PROSPECTIVE:
                 return "EFFECTIVE"
             if r2 >= 0.65:
                 return "MONITOR"
             return "INEFFECTIVE"
 
+        def display_r2(r2: float | None) -> str:
+            return f"{r2:.4f}" if r2 is not None else "N/A"
+
         data = [
-            ["Proxy", "R² (30-day)", "R² (90-day)", "R² (180-day)", "Minimum", "Status"],
+            ["Proxy", "Latest R²", "Evidence Date", "Minimum", "Status", "Comment"],
             [
                 "Heating Oil Fut",
-                f"{r2_ho:.4f}",
-                f"{r2_ho:.4f}",
-                f"{r2_ho:.4f}",
+                display_r2(r2_ho),
+                str(latest_run.run_date),
                 "0.80",
                 status_cell(r2_ho),
+                "Primary designated proxy",
             ],
             [
                 "Brent Crude Fut",
-                f"{r2_brent:.4f}",
-                f"{r2_brent:.4f}",
-                f"{r2_brent:.4f}",
+                display_r2(r2_brent),
+                str(latest_run.run_date),
                 "0.80",
                 status_cell(r2_brent),
+                "Secondary benchmark proxy",
             ],
             [
                 "WTI Crude Fut",
-                f"{r2_wti:.4f}",
-                f"{r2_wti:.4f}",
-                f"{r2_wti:.4f}",
+                display_r2(r2_wti),
+                str(latest_run.run_date),
                 "0.80",
                 status_cell(r2_wti),
+                "Secondary benchmark proxy",
             ],
         ]
 
-        t = Table(data, colWidths=[80, 55, 55, 55, 50, 65])
+        t = Table(data, colWidths=[80, 55, 70, 45, 55, 95])
         t.setStyle(
             TableStyle(
                 [
@@ -331,12 +388,13 @@ class IFRS9ReportService:
             )
         )
 
-        n_effective = sum(1 for r in [r2_ho, r2_brent, r2_wti] if r >= IFRS9_R2_MIN_PROSPECTIVE)
-        passed = r2_ho >= IFRS9_R2_MIN_PROSPECTIVE
+        r2_values = [r for r in [r2_ho, r2_brent, r2_wti] if r is not None]
+        n_effective = sum(1 for r in r2_values if r >= IFRS9_R2_MIN_PROSPECTIVE)
+        passed = r2_ho is not None and r2_ho >= IFRS9_R2_MIN_PROSPECTIVE
         conclusion = (
             f"The prospective effectiveness test {'PASSED' if passed else 'FAILED'} "
-            f"for the current reporting period. {n_effective} of 3 proxy instruments "
-            f"meet the IFRS 9 minimum R² threshold of 0.80. "
+            f"for the current reporting period. {n_effective} of {len(r2_values)} proxy instruments "
+            f"with available evidence meet the IFRS 9 minimum R² threshold of 0.80. "
         )
         if passed:
             conclusion += (
@@ -378,7 +436,7 @@ class IFRS9ReportService:
                     styles["body"],
                 ),
                 Paragraph(
-                    "Requirement: Cumulative offset ratio must fall within 80%–125%.",
+                    "Monitoring band: 80%–125% shown for management evidence; IFRS 9 qualification remains principle-based.",
                     styles["body"],
                 ),
                 Paragraph(
@@ -463,11 +521,41 @@ class IFRS9ReportService:
                 styles["body"],
             ),
             Paragraph(
-                "Requirement: Cumulative offset ratio must fall within 80%–125%.",
+                "Monitoring band: 80%–125% shown for management evidence; IFRS 9 qualification remains principle-based.",
                 styles["body"],
             ),
             Spacer(1, 6),
             t,
+            Spacer(1, 16),
+        ]
+
+    def _build_data_quality_section(
+        self,
+        latest_run: Any,
+        positions: list[Any],
+        current_price: float | None,
+    ) -> list[Any]:
+        styles = self._styles()
+        basis = (latest_run.basis_metrics or {}) if latest_run is not None else {}
+        issues: list[str] = []
+        if latest_run is None:
+            issues.append("No completed analytics run available for the reporting period.")
+        if not positions:
+            issues.append("No open hedge positions at reporting date.")
+        if current_price is None:
+            issues.append("Current jet fuel reference price unavailable.")
+        for key in ("r2_heating_oil", "r2_brent", "r2_wti"):
+            if basis.get(key) is None:
+                issues.append(f"Missing basis metric: {key}.")
+
+        status = "PASS" if not issues else "REVIEW"
+        body = "No material data-quality exceptions detected." if not issues else "<br/>".join(f"- {i}" for i in issues)
+
+        return [
+            Paragraph("<b>4. DATA QUALITY & EVIDENCE CHECKS</b>", styles["navy_header"]),
+            HRFlowable(width="100%", thickness=1, color=NAVY),
+            Paragraph(f"<b>Status:</b> {status}", styles["body"]),
+            Paragraph(body, styles["body"]),
             Spacer(1, 16),
         ]
 
@@ -485,28 +573,115 @@ class IFRS9ReportService:
         assessment = "EFFECTIVE" if effective else "REQUIRES REVIEW"
         qualifies = "qualifies" if effective else "does not qualify"
 
-        conclusion = f"""
-<b>HEDGE EFFECTIVENESS CONCLUSION</b>
-────────────────────────────────────────────────────────────
-Overall assessment: {assessment}
-
-The hedge portfolio {qualifies} for hedge accounting treatment under IFRS 9
-for the period ending {today.isoformat()}.
-
-{"Hedge accounting may continue. No de-designation required. Recommended actions: None — maintain current hedge positions."
-if effective else
-"One or more proxies are approaching the effectiveness threshold. Recommended actions: Review proxy selection for positions with R² < 0.80; consider rebalancing to heating oil futures as primary proxy."}
-
-Next scheduled effectiveness test: {next_test.isoformat()}
-────────────────────────────────────────────────────────────
-<b>DISCLAIMER</b>
-This report is generated by the Fuel Hedging Platform for internal risk management
-and documentation purposes only. It does not constitute professional accounting advice.
-Results must be reviewed and approved by a qualified accountant or external auditor
-before use in external financial reporting, regulatory filings, or audit documentation
-under IFRS 9.
-────────────────────────────────────────────────────────────
-"""
+        conclusion = (
+            "<b>5. HEDGE EFFECTIVENESS CONCLUSION</b><br/>"
+            f"<b>Overall assessment:</b> {assessment}<br/>"
+            f"The hedge portfolio {qualifies} for hedge accounting treatment under IFRS 9 "
+            f"for the period ending {today.isoformat()}.<br/>"
+            + (
+                "Hedge accounting may continue. No de-designation required. "
+                "Recommended action: Maintain current hedge positions and document routine monitoring."
+                if effective
+                else "One or more proxies are approaching or below the effectiveness threshold. "
+                "Recommended action: Review proxy selection and consider rebalancing toward heating oil futures."
+            )
+            + f"<br/><b>Next scheduled effectiveness test:</b> {next_test.isoformat()}<br/><br/>"
+            "<b>Disclaimer:</b> This report is generated for internal risk management and documentation only. "
+            "It does not constitute professional accounting advice and should be reviewed by qualified finance "
+            "and audit stakeholders before external reporting use."
+        )
         return [
             Paragraph(conclusion, styles["body"]),
+        ]
+
+    def _build_signoff_section(self, report_meta: dict[str, Any]) -> list[Any]:
+        styles = self._styles()
+        signoff_table = Table(
+            [
+                ["Role", "Name", "Timestamp (UTC)", "Status"],
+                ["Prepared by (Treasury Analyst)", "________________", report_meta["generated_at"], "Prepared"],
+                ["Reviewed by (Risk Manager)", "________________", "________________", "Pending"],
+                ["Approved by (Controller/CFO)", "________________", "________________", "Pending"],
+            ],
+            colWidths=[120, 120, 130, 80],
+        )
+        signoff_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 9),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT_BG]),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("FONTSIZE", (0, 1), (-1, -1), 8),
+                ]
+            )
+        )
+        return [
+            Paragraph("<b>6. GOVERNANCE SIGN-OFF</b>", styles["navy_header"]),
+            HRFlowable(width="100%", thickness=1, color=NAVY),
+            signoff_table,
+            Spacer(1, 8),
+        ]
+
+    def _build_appendix_evidence(
+        self,
+        latest_run: Any,
+        positions: list[Any],
+        current_price: float | None,
+        report_meta: dict[str, Any],
+    ) -> list[Any]:
+        styles = self._styles()
+        basis = (latest_run.basis_metrics or {}) if latest_run is not None else {}
+        optimizer = (latest_run.optimizer_result or {}) if latest_run is not None else {}
+        var_results = (latest_run.var_results or {}) if latest_run is not None else {}
+
+        evidence_table = Table(
+            [
+                ["Evidence Item", "Value"],
+                ["Report ID", report_meta["report_id"]],
+                ["Run ID", report_meta["analytics_run_id"]],
+                ["Run Date", report_meta["analytics_run_date"]],
+                ["Generated At (UTC)", report_meta["generated_at"]],
+                ["Open Positions", str(len(positions))],
+                ["Current Jet Fuel Price", f"{current_price:.4f}" if current_price is not None else "N/A"],
+                ["Price Source", str(report_meta["price_source"])],
+                ["r2_heating_oil", str(basis.get("r2_heating_oil", "N/A"))],
+                ["r2_brent", str(basis.get("r2_brent", "N/A"))],
+                ["r2_wti", str(basis.get("r2_wti", "N/A"))],
+                ["optimal_hr", str(optimizer.get("optimal_hr", "N/A"))],
+                ["var_hedged_usd", str(var_results.get("var_usd", "N/A"))],
+                ["var_unhedged_usd", str(var_results.get("var_unhedged_usd", "N/A"))],
+                ["IFRS9 prospective threshold", "R² >= 0.80"],
+                ["Retrospective monitoring band", "80% - 125%"],
+            ],
+            colWidths=[170, 280],
+        )
+        evidence_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), NAVY),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT_BG]),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
+
+        calc_notes = (
+            "<b>Calculation Notes</b><br/>"
+            "- Prospective: evaluate economic relationship using regression R² and hedge ratio alignment.<br/>"
+            "- Retrospective monitoring: dollar-offset ratio = |Δ hedging instrument| / |Δ hedged item|.<br/>"
+            "- Data source precedence: live feed tick, then database latest tick, then N/A if unavailable."
+        )
+        return [
+            Paragraph("<b>5A. APPENDIX — EVIDENCE & CALCULATION INPUTS</b>", styles["navy_header"]),
+            HRFlowable(width="100%", thickness=1, color=NAVY),
+            evidence_table,
+            Spacer(1, 8),
+            Paragraph(calc_notes, styles["body"]),
+            Spacer(1, 12),
         ]
