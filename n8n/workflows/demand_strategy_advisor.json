@@ -38,14 +38,14 @@
     },
     {
       "parameters": {
-        "url": "https://api.openai.com/v1/chat/completions",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
         "method": "POST",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Authorization",
-              "value": "=Bearer {{$env.OPENAI_API_KEY}}"
+              "value": "=Bearer {{$env.GROQ_API_KEY}}"
             },
             {
               "name": "Content-Type",
@@ -58,7 +58,7 @@
           "parameters": []
         },
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"max_tokens\": 300,\n  \"temperature\": 0.4,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": {{ JSON.stringify($json.system_prompt) }}\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.user_prompt) }}\n    }\n  ]\n}",
+        "jsonBody": "={\n  \"model\": \"llama-3.3-70b-versatile\",\n  \"max_tokens\": 300,\n  \"temperature\": 0.4,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": {{ JSON.stringify($json.system_prompt) }}\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ JSON.stringify($json.user_prompt) }}\n    }\n  ]\n}",
         "options": {
           "timeout": 15000
         }
@@ -72,7 +72,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extract GPT response and build final output\nconst gptResponse = $input.first().json;\nconst ctx = $('Prompt Builder').first().json;\n\n// Extract narrative from GPT response\nlet narrative = '';\ntry {\n  narrative = gptResponse.choices?.[0]?.message?.content?.trim() ?? '';\n} catch (e) {\n  narrative = '';\n}\n\n// Fallback narrative if GPT fails or returns empty\nif (!narrative || narrative.length < 20) {\n  const saving_m = (ctx.monthly_saving / 1_000_000).toFixed(2);\n  const var_m = (ctx.var_usd / 1_000_000).toFixed(2);\n  const direction = ctx.var_better ? 'reduces' : 'increases';\n  \n  narrative = `Hedging ${(ctx.hedge_ratio * 100).toFixed(0)}% of your ${ctx.consumption.toLocaleString()} bbl monthly uplift ` +\n    `using ${ctx.instrument_summary || 'futures'} produces a portfolio VaR of $${var_m}M — ` +\n    `this ${direction} risk by $${(ctx.var_diff / 1_000_000).toFixed(2)}M versus the system recommendation. ` +\n    `At current prices, this strategy saves approximately $${saving_m}M per month compared to remaining fully unhedged. ` +\n    `Collateral of ${ctx.collateral_pct.toFixed(1)}% of reserves is required — ` +\n    `${ctx.collateral_pct > 12 ? 'approaching the 12% soft warning threshold' : 'within the acceptable 15% limit'}.`;\n}\n\n// Build the complete response\nconst response = {\n  success: true,\n  narrative,\n  what_if: ctx.what_if_result?.what_if ?? {},\n  comparison: ctx.what_if_result?.comparison ?? {},\n  strategy_summary: {\n    hedge_ratio: ctx.hedge_ratio,\n    hedge_ratio_pct: `${(ctx.hedge_ratio * 100).toFixed(0)}%`,\n    consumption_bbl: ctx.consumption,\n    hedged_bbl: ctx.hedged_bbl,\n    unhedged_bbl: ctx.unhedged_bbl,\n    instrument_summary: ctx.instrument_summary,\n    risk_profile: ctx.risk_profile,\n    var_usd: ctx.var_usd,\n    collateral_pct: ctx.collateral_pct,\n    monthly_saving_usd: ctx.monthly_saving\n  },\n  generated_at: new Date().toISOString(),\n  model_used: narrative === '' ? 'fallback' : 'gpt-4o-mini'\n};\n\nreturn [{ json: response }];"
+        "jsCode": "// Extract GPT response and build final output\nconst gptResponse = $input.first().json;\nconst ctx = $('Prompt Builder').first().json;\n\n// Extract narrative from model response\nlet narrative = '';\ntry {\n  narrative = gptResponse.choices?.[0]?.message?.content?.trim() ?? '';\n} catch (e) {\n  narrative = '';\n}\n\nconst usedGroqModel = Boolean(gptResponse?.choices?.[0]?.message?.content);\n\n// Fallback narrative if model fails or returns empty\nif (!narrative || narrative.length < 20) {\n  const saving_m = (ctx.monthly_saving / 1_000_000).toFixed(2);\n  const var_m = (ctx.var_usd / 1_000_000).toFixed(2);\n  const direction = ctx.var_better ? 'reduces' : 'increases';\n  \n  narrative = `Hedging ${(ctx.hedge_ratio * 100).toFixed(0)}% of your ${ctx.consumption.toLocaleString()} bbl monthly uplift ` +\n    `using ${ctx.instrument_summary || 'futures'} produces a portfolio VaR of $${var_m}M — ` +\n    `this ${direction} risk by $${(ctx.var_diff / 1_000_000).toFixed(2)}M versus the system recommendation. ` +\n    `At current prices, this strategy saves approximately $${saving_m}M per month compared to remaining fully unhedged. ` +\n    `Collateral of ${ctx.collateral_pct.toFixed(1)}% of reserves is required — ` +\n    `${ctx.collateral_pct > 12 ? 'approaching the 12% soft warning threshold' : 'within the acceptable 15% limit'}.`;\n}\n\n// Build the complete response\nconst response = {\n  success: true,\n  narrative,\n  what_if: ctx.what_if_result?.what_if ?? {},\n  comparison: ctx.what_if_result?.comparison ?? {},\n  strategy_summary: {\n    hedge_ratio: ctx.hedge_ratio,\n    hedge_ratio_pct: `${(ctx.hedge_ratio * 100).toFixed(0)}%`,\n    consumption_bbl: ctx.consumption,\n    hedged_bbl: ctx.hedged_bbl,\n    unhedged_bbl: ctx.unhedged_bbl,\n    instrument_summary: ctx.instrument_summary,\n    risk_profile: ctx.risk_profile,\n    var_usd: ctx.var_usd,\n    collateral_pct: ctx.collateral_pct,\n    monthly_saving_usd: ctx.monthly_saving\n  },\n  generated_at: new Date().toISOString(),\n  model_used: usedGroqModel ? 'groq_llama-3.3-70b-versatile' : 'fallback'\n};\n\nreturn [{ json: response }];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

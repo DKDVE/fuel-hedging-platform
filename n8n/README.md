@@ -7,13 +7,13 @@
 4. The webhook path is: `/webhook/demand-strategy-advisor`
 
 ### Required environment variable
-Set `OPENAI_API_KEY` in the n8n service environment variables on Render.
+Set `GROQ_API_KEY` in the n8n service environment variables on Render.
 This is the same key used by the existing fuel_hedge_advisor_v2 workflow.
 
 ### How it works
 The workflow receives a POST from FastAPI's `/analytics/demand-strategy`
 endpoint containing the CFO's chosen hedge ratio, consumption volume,
-and the optimizer result. It passes this to GPT-4o-mini with a
+and the optimizer result. It passes this to Groq (`llama-3.3-70b-versatile`) with a
 treasury-analyst system prompt and returns a 3-sentence CFO briefing.
 
 If the workflow is inactive or n8n is unreachable, the endpoint falls

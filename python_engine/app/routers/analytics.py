@@ -1051,6 +1051,7 @@ async def run_demand_strategy_advisor(
 
     narrative = None
     strategy_summary = None
+    model_used = None
 
     max_retries = max(0, int(getattr(settings, "N8N_REQUEST_MAX_RETRIES", 2)))
     backoff_seconds = max(0.25, float(getattr(settings, "N8N_REQUEST_RETRY_BACKOFF_SECONDS", 1.5)))
@@ -1071,6 +1072,7 @@ async def run_demand_strategy_advisor(
                 n8n_data = n8n_response.json()
                 narrative = n8n_data.get("narrative")
                 strategy_summary = n8n_data.get("strategy_summary")
+                model_used = n8n_data.get("model_used")
                 break
 
             if n8n_response.status_code in {429, 502, 503, 504} and attempt < max_retries:
@@ -1126,6 +1128,7 @@ async def run_demand_strategy_advisor(
         "verdict": narrative,
         "narrative": narrative,
         "strategy_summary": strategy_summary,
+        "model_used": model_used or "fallback_template",
         "source": "n8n_gpt" if strategy_summary else "fallback",
     }
 
