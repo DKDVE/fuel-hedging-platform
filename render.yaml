@@ -46,6 +46,14 @@ services:
       # Use N8N_TRIGGER_URL (full URL) when internal hostname fails to resolve
       - key: N8N_TRIGGER_URL
         sync: false   # e.g. https://hedge-n8n-xxx.onrender.com/webhook/fuel-hedge-trigger
+      - key: N8N_DEMAND_STRATEGY_URL
+        sync: false   # e.g. https://hedge-n8n-xxx.onrender.com/webhook/demand-strategy-advisor
+      - key: N8N_REQUEST_TIMEOUT_SECONDS
+        value: "20"
+      - key: N8N_REQUEST_MAX_RETRIES
+        value: "2"
+      - key: N8N_REQUEST_RETRY_BACKOFF_SECONDS
+        value: "1.5"
       - key: N8N_INTERNAL_URL
         fromService:
           type: web
@@ -53,6 +61,18 @@ services:
           property: hostport
       - key: N8N_TRIGGER_PATH
         value: /webhook/fuel-hedge-trigger
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: SCHEDULER_TIMEZONE
+        value: UTC
+      - key: SCHEDULER_DAILY_HOUR
+        value: "0"
+      - key: SCHEDULER_DAILY_MINUTE
+        value: "0"
+      - key: SCHEDULER_MISFIRE_GRACE_SECONDS
+        value: "21600"
+      - key: SCHEDULER_CATCHUP_ON_STARTUP
+        value: "true"
       - key: FRONTEND_ORIGIN
         value: https://dkdve.github.io
       - key: CORS_ORIGINS

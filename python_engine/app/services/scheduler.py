@@ -8,13 +8,16 @@ Handles:
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import get_settings
+from app.db.models import AnalyticsRunStatus
 from app.services.pipeline_runner import run_analytics_pipeline_background
 
 log = structlog.get_logger()
@@ -37,6 +40,73 @@ async def trigger_daily_analytics_pipeline() -> None:
         log.info("daily_analytics_pipeline_finished")
     except Exception as e:
         log.error("daily_analytics_pipeline_error", error=str(e), exc_info=True)
+
+
+def _is_manual_placeholder_run(run: object) -> bool:
+    """Detect n8n-only placeholder runs that lack full pipeline analytics."""
+    forecast_json = getattr(run, "forecast_json", {}) or {}
+    return isinstance(forecast_json, dict) and forecast_json.get("source") == "n8n_manual"
+
+
+def _safe_scheduler_tz() -> str:
+    """Return a valid timezone string for scheduler setup."""
+    try:
+        ZoneInfo(settings.SCHEDULER_TIMEZONE)
+        return settings.SCHEDULER_TIMEZONE
+    except ZoneInfoNotFoundError:
+        log.warning(
+            "invalid_scheduler_timezone_fallback",
+            configured_timezone=settings.SCHEDULER_TIMEZONE,
+            fallback_timezone="UTC",
+        )
+        return "UTC"
+
+
+async def run_startup_catchup_if_needed() -> None:
+    """Backfill missed daily run if service starts after schedule."""
+    if not settings.SCHEDULER_CATCHUP_ON_STARTUP:
+        return
+
+    scheduler_tz = _safe_scheduler_tz()
+    now_local = datetime.now(ZoneInfo(scheduler_tz))
+    scheduled_today = now_local.replace(
+        hour=max(0, min(23, settings.SCHEDULER_DAILY_HOUR)),
+        minute=max(0, min(59, settings.SCHEDULER_DAILY_MINUTE)),
+        second=0,
+        microsecond=0,
+    )
+    if now_local < scheduled_today:
+        log.info(
+            "scheduler_startup_catchup_skipped_not_due",
+            now_local=now_local.isoformat(),
+            scheduled_today=scheduled_today.isoformat(),
+        )
+        return
+
+    from app.db.base import AsyncSessionLocal
+    from app.repositories import AnalyticsRepository
+
+    async with AsyncSessionLocal() as db:
+        repo = AnalyticsRepository(db)
+        run_today = await repo.get_by_date(now_local.date())
+        if run_today is not None:
+            if run_today.status == AnalyticsRunStatus.RUNNING:
+                log.info("scheduler_startup_catchup_skipped_running_pipeline")
+                return
+            if run_today.status == AnalyticsRunStatus.COMPLETED and not _is_manual_placeholder_run(run_today):
+                log.info(
+                    "scheduler_startup_catchup_skipped_completed",
+                    run_id=str(run_today.id),
+                    run_date=str(run_today.run_date),
+                )
+                return
+
+    log.warning(
+        "scheduler_startup_catchup_triggered",
+        reason="missing_or_placeholder_daily_run",
+        run_date=str(now_local.date()),
+    )
+    await trigger_daily_analytics_pipeline()
 
 
 async def check_recommendation_slas() -> None:
@@ -178,21 +248,35 @@ def start_scheduler() -> None:
         log.warning("scheduler_already_running")
         return
 
+    if not settings.SCHEDULER_ENABLED:
+        log.info("scheduler_disabled_by_env")
+        return
+
     log.info("starting_scheduler")
 
-    _scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler_tz = _safe_scheduler_tz()
+    daily_hour = max(0, min(23, settings.SCHEDULER_DAILY_HOUR))
+    daily_minute = max(0, min(59, settings.SCHEDULER_DAILY_MINUTE))
+    misfire_grace = max(60, settings.SCHEDULER_MISFIRE_GRACE_SECONDS)
+    _scheduler = AsyncIOScheduler(timezone=scheduler_tz)
 
-    # Daily analytics pipeline trigger (00:00 UTC)
+    # Daily analytics pipeline trigger
     _scheduler.add_job(
         trigger_daily_analytics_pipeline,
-        trigger=CronTrigger(hour=0, minute=0, timezone="UTC"),
+        trigger=CronTrigger(hour=daily_hour, minute=daily_minute, timezone=scheduler_tz),
         id="daily_analytics_pipeline",
         name="Daily Analytics Pipeline Trigger",
         replace_existing=True,
         coalesce=True,  # If missed, run once (don't queue multiple)
         max_instances=1,  # Only one instance at a time
+        misfire_grace_time=misfire_grace,
     )
-    log.info("scheduled_job_added", job_id="daily_analytics_pipeline", schedule="00:00 UTC daily")
+    log.info(
+        "scheduled_job_added",
+        job_id="daily_analytics_pipeline",
+        schedule=f"{daily_hour:02d}:{daily_minute:02d} {scheduler_tz} daily",
+        misfire_grace_time=misfire_grace,
+    )
 
     # Recommendation SLA monitoring (every hour)
     _scheduler.add_job(
@@ -203,6 +287,7 @@ def start_scheduler() -> None:
         replace_existing=True,
         coalesce=True,
         max_instances=1,
+        misfire_grace_time=misfire_grace,
     )
     log.info("scheduled_job_added", job_id="recommendation_sla_check", schedule="hourly")
 
@@ -215,6 +300,7 @@ def start_scheduler() -> None:
         replace_existing=True,
         coalesce=True,
         max_instances=1,
+        misfire_grace_time=misfire_grace,
     )
     log.info("scheduled_job_added", job_id="price_quality_check", schedule="every 15 minutes")
 
@@ -227,12 +313,32 @@ def start_scheduler() -> None:
         replace_existing=True,
         coalesce=True,
         max_instances=1,
+        misfire_grace_time=misfire_grace,
     )
     log.info("scheduled_job_added", job_id="alert_check", schedule="every 15 minutes")
 
+    if settings.SCHEDULER_CATCHUP_ON_STARTUP:
+        _scheduler.add_job(
+            run_startup_catchup_if_needed,
+            trigger=DateTrigger(run_date=datetime.now(ZoneInfo(scheduler_tz))),
+            id="startup_catchup_check",
+            name="Startup Catchup Check",
+            replace_existing=True,
+            max_instances=1,
+            misfire_grace_time=misfire_grace,
+        )
+        log.info("scheduled_job_added", job_id="startup_catchup_check", schedule="on_startup")
+
     # Start scheduler
     _scheduler.start()
-    log.info("scheduler_started", num_jobs=len(_scheduler.get_jobs()))
+    log.info(
+        "scheduler_started",
+        num_jobs=len(_scheduler.get_jobs()),
+        timezone=scheduler_tz,
+        daily_hour=daily_hour,
+        daily_minute=daily_minute,
+        misfire_grace_time=misfire_grace,
+    )
 
 
 def stop_scheduler() -> None:

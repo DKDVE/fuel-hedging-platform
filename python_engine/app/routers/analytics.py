@@ -181,7 +181,18 @@ async def get_dashboard_summary(
     pos_repo = PositionRepository(db)
     total_notional = await pos_repo.get_total_open_notional()
 
-    # Fetch agent outputs from latest recommendation for this run (from n8n)
+    def _extract_agent_outputs(raw_agent_outputs: object) -> list[dict]:
+        """Normalize agent outputs persisted as either list or {'agents': [...]} dict."""
+        if not raw_agent_outputs:
+            return []
+        agents = raw_agent_outputs.get("agents") if isinstance(raw_agent_outputs, dict) else raw_agent_outputs
+        if isinstance(agents, list) and len(agents) > 0:
+            return [a if isinstance(a, dict) else {} for a in agents]
+        return []
+
+    # Fetch agent outputs from latest recommendation for this run (from n8n).
+    # Fallback to latest recommendation globally when the run has none (common when
+    # n8n/manual recommendations are newer than the latest non-manual pipeline run).
     agent_outputs: list[dict] = []
     rec_result = await db.execute(
         select(HedgeRecommendation)
@@ -189,10 +200,19 @@ async def get_dashboard_summary(
         .order_by(desc(HedgeRecommendation.sequence_number))
     )
     for rec in rec_result.scalars().all():
-        if rec.agent_outputs:
-            agents = rec.agent_outputs.get("agents") if isinstance(rec.agent_outputs, dict) else rec.agent_outputs
-            if isinstance(agents, list) and len(agents) > 0:
-                agent_outputs = [a if isinstance(a, dict) else {} for a in agents]
+        extracted = _extract_agent_outputs(rec.agent_outputs)
+        if extracted:
+            agent_outputs = extracted
+            break
+
+    if not agent_outputs:
+        latest_rec_result = await db.execute(
+            select(HedgeRecommendation).order_by(desc(HedgeRecommendation.sequence_number)).limit(20)
+        )
+        for rec in latest_rec_result.scalars().all():
+            extracted = _extract_agent_outputs(rec.agent_outputs)
+            if extracted:
+                agent_outputs = extracted
                 break
 
     return DashboardSummaryResponse(
@@ -1009,17 +1029,23 @@ async def run_demand_strategy_advisor(
     }
 
     # ── Step 2: Call n8n Demand Strategy Advisor ───────────────────────
-    n8n_webhook_base = getattr(settings, "N8N_WEBHOOK_URL", "")
-    # Build the demand-strategy-advisor URL from the base URL
-    if n8n_webhook_base:
-        # Replace the path: .../webhook/fuel-hedge-advisor → .../webhook/demand-strategy-advisor
-        n8n_url = n8n_webhook_base.replace(
-            "fuel-hedge-trigger",
-            "demand-strategy-advisor"
-        ).replace(
-            "fuel-hedge-advisor",
-            "demand-strategy-advisor"
-        )
+    n8n_demand_url = getattr(settings, "N8N_DEMAND_STRATEGY_URL", "").strip()
+    n8n_webhook_base = getattr(settings, "N8N_WEBHOOK_URL", "").strip()
+    # Use explicit demand URL when configured to prevent trigger/webhook URL conflicts.
+    if n8n_demand_url:
+        n8n_url = n8n_demand_url
+    elif n8n_webhook_base:
+        if "demand-strategy-advisor" in n8n_webhook_base:
+            n8n_url = n8n_webhook_base
+        else:
+            # Backward-compatibility fallback for older env setups.
+            n8n_url = n8n_webhook_base.replace(
+                "fuel-hedge-trigger",
+                "demand-strategy-advisor",
+            ).replace(
+                "fuel-hedge-advisor",
+                "demand-strategy-advisor",
+            )
     else:
         n8n_url = "http://n8n:5678/webhook/demand-strategy-advisor"
 
@@ -1034,25 +1060,59 @@ async def run_demand_strategy_advisor(
     narrative = None
     strategy_summary = None
 
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            n8n_response = await client.post(
-                n8n_url,
-                json=n8n_payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-N8N-API-Key": getattr(
-                        settings, "N8N_WEBHOOK_SECRET", ""
-                    ),
-                },
-            )
+    max_retries = max(0, int(getattr(settings, "N8N_REQUEST_MAX_RETRIES", 2)))
+    backoff_seconds = max(0.25, float(getattr(settings, "N8N_REQUEST_RETRY_BACKOFF_SECONDS", 1.5)))
+    request_timeout = max(5.0, float(getattr(settings, "N8N_REQUEST_TIMEOUT_SECONDS", 20.0)))
+
+    for attempt in range(max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=request_timeout) as client:
+                n8n_response = await client.post(
+                    n8n_url,
+                    json=n8n_payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-N8N-API-Key": getattr(settings, "N8N_WEBHOOK_SECRET", ""),
+                    },
+                )
             if n8n_response.status_code == 200:
                 n8n_data = n8n_response.json()
                 narrative = n8n_data.get("narrative")
                 strategy_summary = n8n_data.get("strategy_summary")
-    except Exception as e:
-        logger.warning("n8n_demand_strategy_unavailable", error=str(e))
-        # Graceful fallback — return optimizer result without GPT narrative
+                break
+
+            if n8n_response.status_code in {429, 502, 503, 504} and attempt < max_retries:
+                wait_seconds = backoff_seconds * (2 ** attempt)
+                logger.warning(
+                    "n8n_demand_strategy_retrying",
+                    status_code=n8n_response.status_code,
+                    attempt=attempt + 1,
+                    max_attempts=max_retries + 1,
+                    wait_seconds=wait_seconds,
+                )
+                await asyncio.sleep(wait_seconds)
+                continue
+
+            logger.warning(
+                "n8n_demand_strategy_non_200",
+                status_code=n8n_response.status_code,
+                body=n8n_response.text[:300],
+            )
+            break
+        except httpx.RequestError as e:
+            if attempt < max_retries:
+                wait_seconds = backoff_seconds * (2 ** attempt)
+                logger.warning(
+                    "n8n_demand_strategy_request_retrying",
+                    error=str(e),
+                    attempt=attempt + 1,
+                    max_attempts=max_retries + 1,
+                    wait_seconds=wait_seconds,
+                )
+                await asyncio.sleep(wait_seconds)
+                continue
+            logger.warning("n8n_demand_strategy_unavailable", error=str(e))
+            break
 
     # ── Step 3: Build fallback verdict if n8n unavailable ─────────────
     if not narrative:

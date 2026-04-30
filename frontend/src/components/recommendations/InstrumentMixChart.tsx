@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, Sector } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector } from 'recharts';
 import { TrendingUp, Download, Info } from 'lucide-react';
 
 interface InstrumentMixChartProps {
@@ -32,6 +32,8 @@ const renderActiveShape = (props: unknown) => {
         startAngle={startAngle}
         endAngle={endAngle}
         fill={fill}
+        stroke="#f8fafc"
+        strokeWidth={2}
       />
     </g>
   );
@@ -148,12 +150,12 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
     return null;
   };
 
-  const CustomLegend = ({ payload }: any) => {
-    if (!payload || payload.length === 0) return null;
+  const CustomLegend = () => {
+    if (!data || data.length === 0) return null;
     return (
-      <div className="flex flex-col gap-2 mt-4">
-        {payload.map((entry: any, index: number) => {
-          const name = entry.payload?.name ?? String(entry.value);
+      <div className="flex flex-col gap-2">
+        {data.map((entry, index) => {
+          const name = entry.name;
           const info = INSTRUMENT_INFO[name];
           const isActive = index === activeIndex;
           return (
@@ -169,7 +171,7 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
                   className={`w-3 h-3 rounded-full transition-all ${
                     isActive ? 'w-4 h-4' : ''
                   }`}
-                  style={{ backgroundColor: entry.color }}
+                  style={{ backgroundColor: COLORS[name] || '#64748b' }}
                 />
                 <div>
                   <span className="text-sm text-slate-300 font-medium">{name}</span>
@@ -197,7 +199,7 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
               <span className={`text-sm font-semibold transition-all ${
                 isActive ? 'text-white text-base' : 'text-slate-400'
               }`}>
-                {entry.payload?.percentage ?? entry.value}%
+                {entry.percentage}%
               </span>
             </div>
           );
@@ -249,12 +251,11 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
         </div>
       </div>
 
-      {/* Chart - pie centered, rendered last so donut stays on top */}
+      {/* Chart + legend are separate blocks to prevent overlap */}
       <div className="pt-4 overflow-visible relative">
-        <ResponsiveContainer width="100%" height={320}>
-          <PieChart margin={{ top: 24, right: 24, bottom: 24, left: 24 }}>
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart margin={{ top: 8, right: 24, bottom: 8, left: 24 }}>
             <Tooltip content={<CustomTooltip />} />
-            <Legend content={<CustomLegend />} />
             <Pie
               activeIndex={activeIndex}
               activeShape={renderActiveShape}
@@ -263,7 +264,7 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
               cy="50%"
               innerRadius={65}
               outerRadius={100}
-              paddingAngle={2}
+              paddingAngle={1}
               dataKey="value"
               onMouseEnter={onPieEnter}
               animationBegin={0}
@@ -273,13 +274,21 @@ export function InstrumentMixChart({ instrumentMix }: InstrumentMixChartProps) {
                 <Cell
                   key={`cell-${index}`}
                   fill={COLORS[entry.name] || '#64748b'}
-                  stroke={index === activeIndex ? '#fff' : 'none'}
-                  strokeWidth={index === activeIndex ? 2 : 0}
+                  stroke={index === activeIndex ? '#f8fafc' : '#0b1220'}
+                  strokeWidth={index === activeIndex ? 2 : 1.5}
+                  style={{
+                    filter: index === activeIndex
+                      ? 'drop-shadow(0 0 8px rgba(248, 250, 252, 0.2))'
+                      : 'drop-shadow(0 0 6px rgba(37, 99, 235, 0.18))'
+                  }}
                 />
               ))}
             </Pie>
           </PieChart>
         </ResponsiveContainer>
+        <div className="mt-4">
+          <CustomLegend />
+        </div>
       </div>
 
       {/* Summary Statistics */}

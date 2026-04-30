@@ -6,7 +6,7 @@
       "parameters": {
         "path": "fuel-hedge-trigger",
         "httpMethod": "POST",
-        "responseMode": "immediately",
+        "responseMode": "onReceived",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",

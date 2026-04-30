@@ -7,6 +7,25 @@ import os
 from typing import Optional
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    """Parse boolean environment variables safely."""
+    raw = os.getenv(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(key: str, default: int) -> int:
+    """Parse integer environment variables with safe fallback."""
+    raw = os.getenv(key)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 class Settings:
     """Application settings loaded from environment variables."""
 
@@ -68,12 +87,20 @@ class Settings:
     SIMULATION_VOLATILITY: float = float(os.getenv("SIMULATION_VOLATILITY", "0.02"))
 
     # n8n Integration
+    # Demand-strategy advisor webhook (separate from pipeline trigger webhook).
     N8N_WEBHOOK_URL: str = os.getenv("N8N_WEBHOOK_URL", "http://localhost:5678/webhook/fuel-hedge-advisor")
+    # Preferred explicit URL for demand-strategy workflow to avoid accidental cross-routing.
+    N8N_DEMAND_STRATEGY_URL: str = os.getenv("N8N_DEMAND_STRATEGY_URL", "").strip()
     N8N_INTERNAL_URL: str = os.getenv("N8N_INTERNAL_URL", "http://n8n:5678")
     N8N_TRIGGER_PATH: str = os.getenv("N8N_TRIGGER_PATH", "/webhook/fuel-hedge-trigger")
     # Full URL override — use when N8N_INTERNAL_URL hostname fails to resolve (e.g. Render)
     N8N_TRIGGER_URL: str = os.getenv("N8N_TRIGGER_URL", "").strip()
     N8N_WEBHOOK_SECRET: str = os.getenv("N8N_WEBHOOK_SECRET", "change_me_in_production")
+    N8N_REQUEST_TIMEOUT_SECONDS: float = float(os.getenv("N8N_REQUEST_TIMEOUT_SECONDS", "20"))
+    N8N_REQUEST_MAX_RETRIES: int = _env_int("N8N_REQUEST_MAX_RETRIES", 2)
+    N8N_REQUEST_RETRY_BACKOFF_SECONDS: float = float(
+        os.getenv("N8N_REQUEST_RETRY_BACKOFF_SECONDS", "1.5")
+    )
 
     # API Configuration
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
@@ -99,6 +126,14 @@ class Settings:
     VAR_REDUCTION_TARGET: float = 0.40
     MAX_COVERAGE_RATIO: float = 1.10
     PIPELINE_TIMEOUT_MINUTES: int = 15
+
+    # Scheduler (Render-safe defaults)
+    SCHEDULER_ENABLED: bool = _env_bool("SCHEDULER_ENABLED", True)
+    SCHEDULER_TIMEZONE: str = os.getenv("SCHEDULER_TIMEZONE", "UTC").strip() or "UTC"
+    SCHEDULER_DAILY_HOUR: int = _env_int("SCHEDULER_DAILY_HOUR", 0)
+    SCHEDULER_DAILY_MINUTE: int = _env_int("SCHEDULER_DAILY_MINUTE", 0)
+    SCHEDULER_MISFIRE_GRACE_SECONDS: int = _env_int("SCHEDULER_MISFIRE_GRACE_SECONDS", 21600)
+    SCHEDULER_CATCHUP_ON_STARTUP: bool = _env_bool("SCHEDULER_CATCHUP_ON_STARTUP", True)
 
     # Inference: TensorFlow + LSTM uses ~200–400MB+ RAM. Default off (ARIMA + XGBoost only).
     # Set ENABLE_LSTM_INFERENCE=true when server has enough RAM (e.g. 1GB+).
