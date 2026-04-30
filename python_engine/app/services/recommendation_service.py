@@ -9,6 +9,7 @@ from typing import Sequence
 from uuid import UUID
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -136,13 +137,18 @@ class RecommendationService:
         
         # Re-fetch after expiration updates
         recommendations = await self.repo.get_pending()
-        
-        return [self._to_response_schema(rec) for rec in recommendations]
+
+        responses: list[HedgeRecommendationResponse] = []
+        for rec in recommendations:
+            resolved_agents = await self._resolve_agent_outputs(rec)
+            responses.append(self._to_response_schema(rec, resolved_agents))
+        return responses
 
     async def get_by_id(self, recommendation_id: UUID) -> HedgeRecommendationResponse:
         """Get single recommendation by ID."""
         recommendation = await self.repo.get_by_id(recommendation_id)
-        return self._to_response_schema(recommendation)
+        resolved_agents = await self._resolve_agent_outputs(recommendation)
+        return self._to_response_schema(recommendation, resolved_agents)
 
     async def list_paginated(
         self,
@@ -166,7 +172,10 @@ class RecommendationService:
             status=status_enum,
         )
 
-        items = [self._to_response_schema(rec) for rec in recommendations]
+        items: list[HedgeRecommendationResponse] = []
+        for rec in recommendations:
+            resolved_agents = await self._resolve_agent_outputs(rec)
+            items.append(self._to_response_schema(rec, resolved_agents))
         pages = (total + limit - 1) // limit  # Ceiling division
 
         return RecommendationListResponse(
@@ -261,7 +270,8 @@ class RecommendationService:
             response_lag_minutes=float(response_lag_minutes),
         )
 
-        return self._to_response_schema(updated_recommendation)
+        resolved_agents = await self._resolve_agent_outputs(updated_recommendation)
+        return self._to_response_schema(updated_recommendation, resolved_agents)
 
     async def reject(
         self,
@@ -313,7 +323,8 @@ class RecommendationService:
             approver_id=str(approver_id),
         )
 
-        return self._to_response_schema(updated_recommendation)
+        resolved_agents = await self._resolve_agent_outputs(updated_recommendation)
+        return self._to_response_schema(updated_recommendation, resolved_agents)
 
     async def defer(
         self,
@@ -365,11 +376,69 @@ class RecommendationService:
             approver_id=str(approver_id),
         )
 
-        return self._to_response_schema(updated_recommendation)
+        resolved_agents = await self._resolve_agent_outputs(updated_recommendation)
+        return self._to_response_schema(updated_recommendation, resolved_agents)
 
     # ============================================================
     # PRIVATE HELPERS
     # ============================================================
+
+    def _extract_agent_outputs_from_json(
+        self,
+        raw_agent_outputs: object,
+    ) -> list[AgentOutput]:
+        """Parse agent outputs from DB JSON payloads.
+
+        Supports both list payloads and {'agents': [...]} payloads.
+        """
+        if not raw_agent_outputs:
+            return []
+
+        agents_raw = (
+            raw_agent_outputs.get("agents")
+            if isinstance(raw_agent_outputs, dict)
+            else raw_agent_outputs
+        )
+        if not isinstance(agents_raw, list):
+            return []
+
+        parsed: list[AgentOutput] = []
+        for item in agents_raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                parsed.append(AgentOutput(**item))
+            except Exception:
+                # Skip malformed historical records rather than failing whole response.
+                continue
+        return parsed
+
+    async def _resolve_agent_outputs(
+        self,
+        recommendation: HedgeRecommendation,
+    ) -> list[AgentOutput]:
+        """Resolve best available agent outputs for a recommendation.
+
+        Priority:
+        1) recommendation.agent_outputs
+        2) latest recommendation for the same run that has agent outputs
+        """
+        direct = self._extract_agent_outputs_from_json(recommendation.agent_outputs)
+        if direct:
+            return direct
+
+        sibling_result = await self.repo.session.execute(
+            select(HedgeRecommendation.agent_outputs)
+            .where(HedgeRecommendation.run_id == recommendation.run_id)
+            .order_by(HedgeRecommendation.sequence_number.desc())
+            .limit(20)
+        )
+        for raw in sibling_result.scalars().all():
+            parsed = self._extract_agent_outputs_from_json(raw)
+            if parsed:
+                return parsed
+
+        return []
 
     def _validate_hard_constraints(
         self,
@@ -446,8 +515,7 @@ class RecommendationService:
         """Convert DB model to API response schema."""
         # Extract agent outputs from JSONB (pipeline-created recs may have empty agents)
         if agent_outputs is None:
-            raw = (recommendation.agent_outputs or {}).get("agents", [])
-            agent_outputs = [AgentOutput(**a) for a in raw if isinstance(a, dict)]
+            agent_outputs = self._extract_agent_outputs_from_json(recommendation.agent_outputs)
 
         # Calculate expiry time (2 hours from creation for PENDING)
         expires_at = None

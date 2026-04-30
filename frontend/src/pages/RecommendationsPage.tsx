@@ -29,70 +29,6 @@ export function RecommendationsPage() {
   const rejectMutation = useRejectRecommendation();
   const deferMutation = useDeferRecommendation();
 
-  // Mock agent analysis data - replace with actual API call
-  const mockAgents = [
-    {
-      agent_id: 'basis_risk',
-      risk_level: 'LOW' as const,
-      recommendation: 'Heating oil correlation remains strong at R²=0.85. Hedge effectiveness is within acceptable bounds.',
-      metrics: {
-        r2_heating_oil: 0.8517,
-        correlation_coefficient: 0.9229,
-        hedge_effectiveness: 0.8234,
-      },
-      constraints_satisfied: true,
-      ifrs9_eligible: true,
-    },
-    {
-      agent_id: 'liquidity',
-      risk_level: 'MODERATE' as const,
-      recommendation: 'Collateral utilization at 12.5% of reserves. Monitor closely as approaching 15% limit.',
-      metrics: {
-        collateral_utilization: 0.125,
-        available_capacity: 0.025,
-        margin_calls: 0,
-      },
-      constraints_satisfied: true,
-      ifrs9_eligible: null,
-    },
-    {
-      agent_id: 'operational',
-      risk_level: 'LOW' as const,
-      recommendation: 'All systems operational. Data feeds stable from EIA, CME, and ICE sources.',
-      metrics: {
-        system_uptime: 0.9987,
-        data_quality_score: 0.98,
-        api_latency_ms: 145,
-      },
-      constraints_satisfied: true,
-      ifrs9_eligible: null,
-    },
-    {
-      agent_id: 'ifrs9',
-      risk_level: 'LOW' as const,
-      recommendation: 'Hedge accounting requirements satisfied. Prospective R²=0.85 and retrospective ratio=0.92 both within bounds.',
-      metrics: {
-        prospective_r2: 0.8517,
-        retrospective_ratio: 0.9234,
-        dollar_offset_ratio: 0.9123,
-      },
-      constraints_satisfied: true,
-      ifrs9_eligible: true,
-    },
-    {
-      agent_id: 'macro',
-      risk_level: 'MODERATE' as const,
-      recommendation: 'Geopolitical tensions in Middle East may impact crude prices. Consider increasing hedge ratio to 75%.',
-      metrics: {
-        volatility_index: 28.5,
-        brent_wti_spread: 2.34,
-        crack_spread_volatility: 15.2,
-      },
-      constraints_satisfied: true,
-      ifrs9_eligible: null,
-    },
-  ];
-
   const handleApprove = async (
     id: string,
     comments?: string,
@@ -199,8 +135,10 @@ export function RecommendationsPage() {
       {/* Content */}
       {!isLoading && recommendations && recommendations.length > 0 && (
         <div className="space-y-6">
-          {recommendations.map((rec) => (
-            <div key={rec.id} className="space-y-6">
+          {recommendations.map((rec) => {
+            const recAgents = rec.agent_outputs ?? [];
+            return (
+              <div key={rec.id} className="space-y-6">
               {/* Approval Workflow Card */}
               <ApprovalWorkflowCard
                 recommendation={rec}
@@ -225,7 +163,7 @@ export function RecommendationsPage() {
                 {/* Agent Details Accordion — use actual agent_outputs when available */}
                 <AgentDetailsAccordion
                   agents={
-                    (rec.agent_outputs ?? mockAgents).map((a) => ({
+                    recAgents.map((a) => ({
                       agent_id: a.agent_id,
                       risk_level: a.risk_level,
                       recommendation: a.recommendation,
@@ -240,7 +178,7 @@ export function RecommendationsPage() {
               {/* Explainability Panel — AI committee reasoning */}
               <ExplainabilityPanel
                 agentOutputs={
-                  (rec.agent_outputs ?? mockAgents).map((a) => ({
+                  recAgents.map((a) => ({
                     agent_id: a.agent_id,
                     risk_level: a.risk_level,
                     recommendation: a.recommendation,
@@ -264,8 +202,9 @@ export function RecommendationsPage() {
               {recommendations.length > 1 && (
                 <div className="border-t border-slate-800 pt-6" />
               )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
 
           {/* Pagination for 'all' tab */}
           {activeTab === 'all' && allData && allData.pages > 1 && (

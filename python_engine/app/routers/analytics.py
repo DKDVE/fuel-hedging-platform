@@ -194,8 +194,7 @@ async def get_dashboard_summary(
         return []
 
     # Fetch agent outputs from latest recommendation for this run (from n8n).
-    # Fallback to latest recommendation globally when the run has none (common when
-    # n8n/manual recommendations are newer than the latest non-manual pipeline run).
+    # Do not fallback globally; stale cross-run analysis can mislead dashboard users.
     agent_outputs: list[dict] = []
     rec_result = await db.execute(
         select(HedgeRecommendation)
@@ -207,16 +206,6 @@ async def get_dashboard_summary(
         if extracted:
             agent_outputs = extracted
             break
-
-    if not agent_outputs:
-        latest_rec_result = await db.execute(
-            select(HedgeRecommendation).order_by(desc(HedgeRecommendation.sequence_number)).limit(20)
-        )
-        for rec in latest_rec_result.scalars().all():
-            extracted = _extract_agent_outputs(rec.agent_outputs)
-            if extracted:
-                agent_outputs = extracted
-                break
 
     return DashboardSummaryResponse(
         current_var_usd=var_usd,
