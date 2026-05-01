@@ -15,6 +15,22 @@ interface AgentDetailsAccordionProps {
   agents: AgentAnalysis[];
 }
 
+function formatMetricValue(metricKey: string, value: number): string {
+  const key = metricKey.toLowerCase();
+  const isPercentageMetric =
+    key.includes('pct') ||
+    key.includes('percent') ||
+    key.includes('utilization') ||
+    key.includes('utilisation');
+
+  if (isPercentageMetric) {
+    const percentValue = value <= 1 ? value * 100 : value;
+    return `${percentValue.toFixed(2)}%`;
+  }
+
+  return value.toFixed(4);
+}
+
 function AccordionItem({ agent }: { agent: AgentAnalysis }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -119,7 +135,7 @@ function AccordionItem({ agent }: { agent: AgentAnalysis }) {
                           {key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                         </td>
                         <td className="px-3 py-2 text-sm font-semibold text-white text-right">
-                          {typeof value === 'number' ? value.toFixed(4) : value}
+                          {typeof value === 'number' ? formatMetricValue(key, value) : value}
                         </td>
                       </tr>
                     ))}

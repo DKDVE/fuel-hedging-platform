@@ -16,6 +16,29 @@ interface Props {
   approvedForPresentation?: boolean;
 }
 
+function formatMetricValue(metricKey: string, value: number | boolean | string | undefined): string {
+  if (typeof value === 'boolean') {
+    return value ? '✅ Yes' : '❌ No';
+  }
+  if (typeof value !== 'number') {
+    return String(value);
+  }
+
+  const key = metricKey.toLowerCase();
+  const isPercentageMetric =
+    key.includes('pct') ||
+    key.includes('percent') ||
+    key.includes('utilization') ||
+    key.includes('utilisation');
+
+  if (isPercentageMetric) {
+    const percentValue = value <= 1 ? value * 100 : value;
+    return `${percentValue.toFixed(2)}%`;
+  }
+
+  return Math.abs(value) < 10 ? value.toFixed(4) : value.toFixed(2);
+}
+
 function AgentCard({ agent }: { agent: AgentOutput }) {
   const [expanded, setExpanded] = useState(false);
   const meta = AGENT_DISPLAY_NAMES[agent.agent_id] ?? {
@@ -76,15 +99,7 @@ function AgentCard({ agent }: { agent: AgentOutput }) {
                     {key.replace(/_/g, ' ')}
                   </p>
                   <p className="text-sm font-mono text-white mt-0.5">
-                    {typeof value === 'boolean'
-                      ? value
-                        ? '✅ Yes'
-                        : '❌ No'
-                      : typeof value === 'number'
-                        ? Math.abs(value) < 10
-                          ? value.toFixed(4)
-                          : value.toFixed(2)
-                        : String(value)}
+                    {formatMetricValue(key, value)}
                   </p>
                 </div>
               ))}
