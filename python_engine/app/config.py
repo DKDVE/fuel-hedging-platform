@@ -101,6 +101,9 @@ class Settings:
     N8N_REQUEST_RETRY_BACKOFF_SECONDS: float = float(
         os.getenv("N8N_REQUEST_RETRY_BACKOFF_SECONDS", "1.5")
     )
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "").strip()
+    GROQ_BASE_URL: str = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").strip()
+    GROQ_DASHBOARD_MODEL: str = os.getenv("GROQ_DASHBOARD_MODEL", "llama-3.3-70b-versatile").strip()
 
     # API Configuration
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")

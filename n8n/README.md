@@ -9,6 +9,8 @@
 ### Required environment variable
 Set `GROQ_API_KEY` in the n8n service environment variables on Render.
 This is the same key used by the existing fuel_hedge_advisor_v2 workflow.
+Set the same `GROQ_API_KEY` in the `hedge-api` service as well, so the
+dashboard "Live AI Risk Brief" can call Groq directly.
 
 ### How it works
 The workflow receives a POST from FastAPI's `/analytics/demand-strategy`

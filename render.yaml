@@ -35,6 +35,8 @@ services:
         sync: false
       - key: OPENAI_API_KEY
         sync: false
+      - key: GROQ_API_KEY
+        sync: false
       - key: EIA_API_KEY
         sync: false
 
@@ -60,6 +62,10 @@ services:
         value: "2"
       - key: N8N_REQUEST_RETRY_BACKOFF_SECONDS
         value: "1.5"
+      - key: GROQ_BASE_URL
+        value: https://api.groq.com/openai/v1
+      - key: GROQ_DASHBOARD_MODEL
+        value: llama-3.3-70b-versatile
       - key: N8N_INTERNAL_URL
         fromService:
           type: web
@@ -131,6 +137,8 @@ services:
           name: hedge-api
           property: hostport
       - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
         sync: false
       - key: N8N_ENCRYPTION_KEY
         sync: false

@@ -9,6 +9,7 @@ DIAGNOSIS: Run Pipeline button failures.
 """
 
 import asyncio
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -18,7 +19,7 @@ import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.core.units import normalize_percent_value
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +62,180 @@ def get_scenario_service() -> ScenarioService:
         _scenario_service = ScenarioService()
     return _scenario_service
 logger = structlog.get_logger()
+
+
+def _compute_brief_risk_level(
+    *,
+    collateral_pct: float,
+    mape: float,
+    r2_heating_oil: float,
+    var_reduction_pct: float,
+) -> str:
+    """Compute deterministic risk tier for dashboard AI brief."""
+    if collateral_pct > 15 or r2_heating_oil < 0.80:
+        return "CRITICAL"
+    if collateral_pct > 12 or mape > 8 or var_reduction_pct < 30:
+        return "MODERATE"
+    return "LOW"
+
+
+def _fallback_dashboard_ai_brief(
+    *,
+    run_updated_at: str,
+    collateral_pct: float,
+    mape: float,
+    r2_heating_oil: float,
+    var_reduction_pct: float,
+    source: str,
+) -> dict:
+    """Fallback brief used when LLM is unavailable or returns invalid output."""
+    risk_level = _compute_brief_risk_level(
+        collateral_pct=collateral_pct,
+        mape=mape,
+        r2_heating_oil=r2_heating_oil,
+        var_reduction_pct=var_reduction_pct,
+    )
+    key_action = (
+        "Reduce hedge aggressiveness and verify collateral headroom."
+        if risk_level == "CRITICAL"
+        else "Maintain current strategy and monitor collateral utilization daily."
+    )
+    return {
+        "summary": (
+            f"Portfolio shows {risk_level.lower()} risk with collateral at {collateral_pct:.1f}%, "
+            f"MAPE at {mape:.2f}%, IFRS9 R² at {r2_heating_oil:.4f}, and VaR reduction at {var_reduction_pct:.1f}%."
+        ),
+        "key_action": key_action,
+        "risk_level": risk_level,
+        "model_used": "fallback_template",
+        "source": source,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_updated_at": run_updated_at,
+    }
+
+
+async def _build_dashboard_ai_brief(
+    *,
+    run: AnalyticsRun,
+    db: AsyncSession,
+    settings: Settings,
+    current_var_usd: float,
+    current_hedge_ratio: float,
+    collateral_pct: float,
+    mape_pct: float,
+    var_reduction_pct: float,
+    r2_heating_oil: float,
+    ifrs9_compliance_status: str,
+    total_notional_usd: float,
+) -> dict:
+    """Return cached dashboard brief or generate a fresh one with Groq."""
+    run_updated_at = run.updated_at.isoformat()
+    forecast_json = dict(run.forecast_json or {})
+    cached = forecast_json.get("dashboard_ai_brief")
+    if isinstance(cached, dict) and cached.get("run_updated_at") == run_updated_at:
+        return cached
+
+    if not settings.GROQ_API_KEY:
+        return _fallback_dashboard_ai_brief(
+            run_updated_at=run_updated_at,
+            collateral_pct=collateral_pct,
+            mape=mape_pct,
+            r2_heating_oil=r2_heating_oil,
+            var_reduction_pct=var_reduction_pct,
+            source="fallback_no_groq_key",
+        )
+
+    system_prompt = (
+        "You are a senior aviation fuel hedging risk analyst. "
+        "Provide a concise executive brief using quantitative metrics. "
+        "Return JSON only with keys: summary, key_action, risk_level. "
+        "risk_level must be one of LOW, MODERATE, HIGH, CRITICAL."
+    )
+    user_prompt = (
+        "Create a dashboard live risk brief from these metrics:\n"
+        f"- current_var_usd: {current_var_usd:.2f}\n"
+        f"- current_hedge_ratio: {current_hedge_ratio:.4f}\n"
+        f"- collateral_pct: {collateral_pct:.2f}\n"
+        f"- mape_pct: {mape_pct:.2f}\n"
+        f"- var_reduction_pct: {var_reduction_pct:.2f}\n"
+        f"- r2_heating_oil: {r2_heating_oil:.4f}\n"
+        f"- ifrs9_compliance_status: {ifrs9_compliance_status}\n"
+        f"- total_notional_usd: {total_notional_usd:.2f}\n"
+        "Requirements: summary <= 70 words. key_action <= 20 words."
+    )
+
+    request_url = f"{settings.GROQ_BASE_URL.rstrip('/')}/chat/completions"
+    retries = max(0, int(settings.N8N_REQUEST_MAX_RETRIES))
+    backoff = max(0.1, float(settings.N8N_REQUEST_RETRY_BACKOFF_SECONDS))
+    timeout_seconds = max(3.0, float(settings.N8N_REQUEST_TIMEOUT_SECONDS))
+
+    parsed_payload: dict | None = None
+    for attempt in range(retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.post(
+                    request_url,
+                    headers={"Authorization": f"Bearer {settings.GROQ_API_KEY}"},
+                    json={
+                        "model": settings.GROQ_DASHBOARD_MODEL,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.2,
+                        "max_tokens": 220,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+                message = (
+                    data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                )
+                parsed = json.loads(message) if message else {}
+                if isinstance(parsed, dict):
+                    parsed_payload = parsed
+                    break
+        except Exception as exc:
+            if attempt >= retries:
+                logger.warning("dashboard_ai_brief_generation_failed", error=str(exc))
+                break
+            await asyncio.sleep(backoff * (2**attempt))
+
+    if not parsed_payload:
+        return _fallback_dashboard_ai_brief(
+            run_updated_at=run_updated_at,
+            collateral_pct=collateral_pct,
+            mape=mape_pct,
+            r2_heating_oil=r2_heating_oil,
+            var_reduction_pct=var_reduction_pct,
+            source="fallback_llm_error",
+        )
+
+    risk_level = str(parsed_payload.get("risk_level", "MODERATE")).upper().strip()
+    if risk_level not in {"LOW", "MODERATE", "HIGH", "CRITICAL"}:
+        risk_level = _compute_brief_risk_level(
+            collateral_pct=collateral_pct,
+            mape=mape_pct,
+            r2_heating_oil=r2_heating_oil,
+            var_reduction_pct=var_reduction_pct,
+        )
+
+    brief = {
+        "summary": str(parsed_payload.get("summary", "")).strip()
+        or "Live risk brief unavailable. Using deterministic fallback guidance.",
+        "key_action": str(parsed_payload.get("key_action", "")).strip()
+        or "Review collateral and hedge ratio before next execution window.",
+        "risk_level": risk_level,
+        "model_used": f"groq_{settings.GROQ_DASHBOARD_MODEL}",
+        "source": "groq_llm",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "run_updated_at": run_updated_at,
+    }
+
+    forecast_json["dashboard_ai_brief"] = brief
+    run.forecast_json = forecast_json
+    await db.commit()
+    return brief
 
 
 @router.get("", response_model=PaginatedResponse[AnalyticsRunResponse])
@@ -156,6 +331,7 @@ async def get_dashboard_summary(
     run = await repo.get_latest_completed()
     if run is None:
         return DashboardSummaryResponse(
+            ai_brief=None,
             current_var_usd=0.0,
             current_hedge_ratio=0.0,
             collateral_pct=0.0,
@@ -183,6 +359,22 @@ async def get_dashboard_summary(
     from app.repositories import PositionRepository
     pos_repo = PositionRepository(db)
     total_notional = await pos_repo.get_total_open_notional()
+    total_notional_value = float(total_notional) if total_notional else 0.0
+
+    settings = get_settings()
+    ai_brief = await _build_dashboard_ai_brief(
+        run=run,
+        db=db,
+        settings=settings,
+        current_var_usd=var_usd,
+        current_hedge_ratio=optimal_hr,
+        collateral_pct=collateral,
+        mape_pct=mape,
+        var_reduction_pct=var_reduction,
+        r2_heating_oil=r2_ho,
+        ifrs9_compliance_status=ifrs9,
+        total_notional_usd=total_notional_value,
+    )
 
     def _extract_agent_outputs(raw_agent_outputs: object) -> list[dict]:
         """Normalize agent outputs persisted as either list or {'agents': [...]} dict."""
@@ -208,6 +400,7 @@ async def get_dashboard_summary(
             break
 
     return DashboardSummaryResponse(
+        ai_brief=ai_brief,
         current_var_usd=var_usd,
         current_hedge_ratio=optimal_hr,
         collateral_pct=collateral,
@@ -217,7 +410,7 @@ async def get_dashboard_summary(
         last_updated=last_updated,
         agent_outputs=agent_outputs,
         r2_heating_oil=r2_ho,
-        total_notional_usd=float(total_notional) if total_notional else None,
+        total_notional_usd=total_notional_value if total_notional_value > 0 else None,
     )
 
 

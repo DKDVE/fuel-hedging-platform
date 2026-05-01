@@ -104,6 +104,7 @@ class DashboardSummaryResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    ai_brief: Optional[dict] = Field(default=None, description="LLM generated dashboard brief")
     current_var_usd: float = Field(default=0.0, description="Current VaR in USD")
     current_hedge_ratio: float = Field(default=0.0, description="Current hedge ratio 0-1")
     collateral_pct: float = Field(default=0.0, description="Collateral as % of notional")

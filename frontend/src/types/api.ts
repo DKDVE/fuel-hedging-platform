@@ -200,6 +200,14 @@ export interface AnalyticsRunSummaryResponse {
 }
 
 export interface DashboardSummaryResponse {
+  ai_brief?: {
+    summary: string;
+    key_action: string;
+    risk_level: 'LOW' | 'MODERATE' | 'HIGH' | 'CRITICAL';
+    model_used: string;
+    source: string;
+    generated_at: string;
+  } | null;
   current_var_usd: number;
   current_hedge_ratio: number;
   collateral_pct: number;
