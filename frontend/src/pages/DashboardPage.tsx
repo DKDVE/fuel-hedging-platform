@@ -711,7 +711,7 @@ export function DashboardPage() {
           <div>
             <h3 className="text-lg font-semibold text-white flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary-500" />
-              Live AI Risk Brief
+              AI Risk Brief
             </h3>
             <p className="text-sm text-slate-400 mt-1">
               Llama-3.3 executive signal for current dashboard risk posture
